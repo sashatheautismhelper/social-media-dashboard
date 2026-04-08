@@ -1,0 +1,1006 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Autism Helper â Weekly Social Media Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --primary: #148496;
+    --primary-light: #E6F4F6;
+    --primary-dark: #005160;
+    --accent: #F1592E;
+    --ig: #E1306C;
+    --fb: #1877F2;
+    --tt: #000000;
+    --pin: #E60023;
+    --yt: #FF0000;
+    --green: #27AE60;
+    --amber: #F2994A;
+    --red: #EB5757;
+    --gray-50: #F9FAFB;
+    --gray-100: #F3F4F6;
+    --gray-200: #E5E7EB;
+    --gray-300: #D1D5DB;
+    --gray-500: #6B7280;
+    --gray-700: #374151;
+    --gray-900: #111827;
+    --radius: 12px;
+    --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
+    --shadow-md: 0 4px 6px rgba(0,0,0,0.07), 0 2px 4px rgba(0,0,0,0.06);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--gray-50); color: var(--gray-900); line-height: 1.5; }
+
+  .header { background: var(--primary-dark); border-bottom: none; padding: 20px 32px; display: flex; align-items: center; justify-content: space-between; }
+  .header h1, .header .date-badge, .header .subtitle { color: white; }
+  .header .date-badge { background: rgba(255,255,255,0.15); color: white; }
+  .header-logo { height: 44px; width: auto; }
+  .header-left { display: flex; align-items: center; gap: 16px; }
+  .header h1 { font-size: 22px; font-weight: 700; }
+  .header .date-badge { background: rgba(255,255,255,0.15); color: white; padding: 6px 14px; border-radius: 20px; font-size: 13px; font-weight: 600; }
+  /* logo-circle replaced by header-logo img */
+
+  .tabs { background: white; border-bottom: 2px solid var(--primary-light); padding: 0 32px; display: flex; gap: 0; overflow-x: auto; }
+  .tab { padding: 14px 22px; font-size: 14px; font-weight: 500; color: var(--gray-500); cursor: pointer; border-bottom: 3px solid transparent; transition: all 0.2s; white-space: nowrap; display: flex; align-items: center; gap: 8px; }
+  .tab:hover { color: var(--gray-700); background: var(--gray-50); }
+  .tab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
+  .tab .dot { width: 8px; height: 8px; border-radius: 50%; }
+
+  .content { max-width: 1280px; margin: 0 auto; padding: 24px 32px; }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  .cards-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .card { background: white; border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow); border: 1px solid var(--gray-200); }
+  .card-label { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--gray-500); margin-bottom: 6px; }
+  .card-value { font-size: 28px; font-weight: 700; color: var(--gray-900); }
+  .card-change { font-size: 13px; font-weight: 600; margin-top: 4px; display: flex; align-items: center; gap: 4px; }
+  .card-change.up { color: var(--green); }
+  .card-change.down { color: var(--red); }
+  .card-change.neutral { color: var(--amber); }
+  .card-sub { font-size: 12px; color: var(--gray-500); margin-top: 2px; }
+
+  .chart-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+  .chart-box { background: white; border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow); border: 1px solid var(--gray-200); }
+  .chart-box h3 { font-size: 15px; font-weight: 600; margin-bottom: 12px; color: var(--gray-700); }
+  .chart-box canvas { width: 100% !important; max-height: 280px; }
+  .chart-box.full { grid-column: 1 / -1; }
+
+  .insights-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+  .insight-card { background: white; border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow); border-left: 4px solid var(--primary); border-right: 1px solid var(--gray-200); border-top: 1px solid var(--gray-200); border-bottom: 1px solid var(--gray-200); }
+  .insight-card.success { border-left-color: var(--green); }
+  .insight-card.warning { border-left-color: var(--amber); }
+  .insight-card.danger { border-left-color: var(--red); }
+  .insight-card h4 { font-size: 14px; font-weight: 600; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+  .insight-card p { font-size: 13px; color: var(--gray-700); line-height: 1.6; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .badge.green { background: #D0EEF2; color: #005160; }
+  .badge.amber { background: #FDE8E0; color: #C0391B; }
+  .badge.red { background: #FDE8E8; color: #9B1C1C; }
+
+  .content-list { background: white; border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow); border: 1px solid var(--gray-200); margin-bottom: 24px; }
+  .content-list h3 { font-size: 15px; font-weight: 600; margin-bottom: 12px; color: var(--gray-700); }
+
+  .post-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .post-table th { text-align: left; padding: 10px 12px; font-weight: 600; color: var(--gray-500); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 2px solid var(--gray-200); }
+  .post-table td { padding: 10px 12px; border-bottom: 1px solid var(--gray-100); vertical-align: top; }
+  .post-table tr:hover { background: var(--gray-50); }
+  .post-table .post-title { font-weight: 500; color: var(--gray-900); max-width: 320px; }
+  .post-table .metric { font-weight: 600; text-align: right; }
+  .post-table .metric.highlight { color: var(--green); }
+
+  .summary-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .summary-table th { text-align: left; padding: 12px 16px; font-weight: 600; color: var(--gray-500); font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 2px solid var(--gray-200); }
+  .summary-table td { padding: 14px 16px; border-bottom: 1px solid var(--gray-100); }
+  .summary-table tr:hover { background: var(--gray-50); }
+  .platform-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 8px; vertical-align: middle; }
+
+  .section-title { font-size: 17px; font-weight: 700; margin-bottom: 16px; color: var(--gray-900); display: flex; align-items: center; gap: 8px; }
+  .section-title .icon { font-size: 20px; }
+
+  .top-post-banner { background: linear-gradient(135deg, var(--primary-light), #d0eef2); border: 1px solid #a8dce3; border-radius: var(--radius); padding: 20px; margin-bottom: 24px; display: flex; align-items: center; gap: 16px; }
+  .top-post-banner .trophy { font-size: 32px; }
+  .top-post-banner h3 { font-size: 15px; font-weight: 700; color: var(--primary-dark); }
+  .top-post-banner p { font-size: 13px; color: var(--primary); margin-top: 2px; }
+
+  /* Strategy & Analysis sections */
+  .strategy-section { background: white; border-radius: var(--radius); padding: 24px; box-shadow: var(--shadow); border: 1px solid var(--gray-200); margin-bottom: 24px; }
+  .strategy-section h3 { font-size: 16px; font-weight: 700; margin-bottom: 16px; color: var(--gray-900); }
+  .strategy-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .strategy-item { padding: 16px; border-radius: 8px; background: var(--gray-50); border: 1px solid var(--gray-200); }
+  .strategy-item h4 { font-size: 13px; font-weight: 700; margin-bottom: 6px; color: var(--primary-dark); }
+  .strategy-item p { font-size: 12px; color: var(--gray-700); line-height: 1.5; }
+  .strategy-item .stat { font-size: 20px; font-weight: 700; color: var(--primary); margin-bottom: 4px; }
+
+  .content-theme { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--gray-100); }
+  .content-theme:last-child { border-bottom: none; }
+  .theme-rank { width: 28px; height: 28px; border-radius: 50%; background: var(--primary); color: white; font-size: 13px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .theme-info { flex: 1; }
+  .theme-info h4 { font-size: 14px; font-weight: 600; color: var(--gray-900); }
+  .theme-info p { font-size: 12px; color: var(--gray-500); margin-top: 2px; }
+  .theme-metric { text-align: right; }
+  .theme-metric .val { font-size: 16px; font-weight: 700; color: var(--gray-900); }
+  .theme-metric .label { font-size: 11px; color: var(--gray-500); }
+
+  .action-item { display: flex; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--gray-100); }
+  .action-item:last-child { border-bottom: none; }
+  .action-number { width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: white; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px; }
+  .action-item h4 { font-size: 13px; font-weight: 600; color: var(--gray-900); margin-bottom: 3px; }
+  .action-item p { font-size: 12px; color: var(--gray-700); line-height: 1.5; }
+  .action-platform { display: inline-block; font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 4px; background: var(--gray-100); color: var(--gray-700); margin-left: 6px; }
+
+  .compare-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .compare-bar .bar-label { font-size: 12px; font-weight: 600; color: var(--gray-700); width: 120px; flex-shrink: 0; }
+  .compare-bar .bar-track { flex: 1; height: 22px; background: var(--gray-100); border-radius: 6px; overflow: hidden; position: relative; }
+  .compare-bar .bar-fill { height: 100%; border-radius: 6px; display: flex; align-items: center; padding-left: 8px; font-size: 11px; font-weight: 600; color: white; min-width: 40px; }
+  .compare-bar .bar-value { font-size: 12px; font-weight: 600; color: var(--gray-700); width: 60px; text-align: right; flex-shrink: 0; }
+
+  @media (max-width: 768px) {
+    .strategy-row { grid-template-columns: 1fr; }
+    .chart-row, .insights-grid { grid-template-columns: 1fr; }
+    .cards-row { grid-template-columns: repeat(2, 1fr); }
+    .content { padding: 16px; }
+    .header { padding: 16px; }
+    .tabs { padding: 0 16px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <img src="https://theautismhelper.com/wp-content/uploads/2021/05/TAH-logo_large.png" alt="The Autism Helper" class="header-logo">
+    <div>
+      <h1>Social Media Dashboard</h1>
+      <div class="subtitle" style="font-size:13px; opacity:0.8; margin-top:2px;">Weekly Performance Report &bull; Enriched Engagement Data</div>
+    </div>
+  </div>
+  <div class="date-badge">Week of March 31 â April 6, 2026</div>
+</div>
+
+<div class="tabs">
+  <div class="tab active" onclick="showTab('overview')"><span class="dot" style="background:var(--primary)"></span> Overview</div>
+  <div class="tab" onclick="showTab('instagram')"><span class="dot" style="background:var(--ig)"></span> Instagram</div>
+  <div class="tab" onclick="showTab('facebook')"><span class="dot" style="background:var(--fb)"></span> Facebook</div>
+  <div class="tab" onclick="showTab('tiktok')"><span class="dot" style="background:var(--tt)"></span> TikTok</div>
+  <div class="tab" onclick="showTab('pinterest')"><span class="dot" style="background:var(--pin)"></span> Pinterest</div>
+  <div class="tab" onclick="showTab('youtube')"><span class="dot" style="background:var(--yt)"></span> YouTube</div>
+</div>
+
+<div class="content">
+
+<!-- ============ OVERVIEW ============ -->
+<div class="tab-content active" id="tab-overview">
+
+  <div class="section-title"><span class="icon">ð</span> Cross-Platform Snapshot</div>
+  <div class="cards-row">
+    <div class="card">
+      <div class="card-label">Total Engagement (20 posts sampled per platform)</div>
+      <div class="card-value">5,874</div>
+      <div class="card-sub">Likes + Comments + Shares across all platforms</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Total Video Plays</div>
+      <div class="card-value">99,502</div>
+      <div class="card-sub">TikTok plays + YouTube views + IG video views</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Top Platform by Engagement Rate</div>
+      <div class="card-value" style="font-size:22px;">TikTok</div>
+      <div class="card-change up">Avg 236 likes/video, 4,974 plays/video</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Top Performing Post</div>
+      <div class="card-value" style="font-size:16px;">Behavior Crisis Visual Cards</div>
+      <div class="card-change up">29,800 plays &bull; 777 likes &bull; TikTok</div>
+    </div>
+  </div>
+
+  <!-- Cross-platform engagement chart -->
+  <div class="chart-row">
+    <div class="chart-box">
+      <h3>Avg. Engagement per Post by Platform</h3>
+      <canvas id="chartCrossEngagement"></canvas>
+    </div>
+    <div class="chart-box">
+      <h3>Total Video Views/Plays by Platform</h3>
+      <canvas id="chartCrossViews"></canvas>
+    </div>
+  </div>
+
+  <!-- Platform summary table -->
+  <div class="content-list">
+    <h3>Platform Performance Summary (20 most recent posts each)</h3>
+    <table class="summary-table">
+      <thead><tr>
+        <th>Platform</th><th>Total Likes</th><th>Total Comments</th><th>Total Shares</th><th>Total Views/Plays</th><th>Avg. Engagement/Post</th><th>Top Post</th>
+      </tr></thead>
+      <tbody>
+        <tr>
+          <td><span class="platform-dot" style="background:var(--ig)"></span>Instagram</td>
+          <td>1,116</td><td>176</td><td>â</td><td>14,076 (video views)</td><td>64.6</td><td>Ranking SPED Strategies (270 likes)</td>
+        </tr>
+        <tr>
+          <td><span class="platform-dot" style="background:var(--fb)"></span>Facebook</td>
+          <td>832</td><td>89</td><td>74</td><td>â</td><td>49.8</td><td>Teaching Conversation Skills (349 likes)</td>
+        </tr>
+        <tr>
+          <td><span class="platform-dot" style="background:var(--tt)"></span>TikTok</td>
+          <td>4,716</td><td>252</td><td>513</td><td>99,480</td><td>274.1</td><td>Behavior Crisis Cards (29.8K plays)</td>
+        </tr>
+        <tr>
+          <td><span class="platform-dot" style="background:var(--pin)"></span>Pinterest</td>
+          <td colspan="6" style="color:var(--gray-500);">Profile active &bull; 14.8K followers &bull; 5.4M monthly views &bull; 1,760 pins</td>
+        </tr>
+        <tr>
+          <td><span class="platform-dot" style="background:var(--yt)"></span>YouTube</td>
+          <td>417</td><td>â</td><td>â</td><td>11,946</td><td>20.9 likes/vid</td><td>Crisis to Calm (2,354 views)</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Key Insights -->
+  <div class="section-title"><span class="icon">ð¡</span> Key Insights This Week</div>
+  <div class="insights-grid">
+    <div class="insight-card success">
+      <h4><span class="badge green">Working</span> TikTok is your engagement powerhouse</h4>
+      <p>TikTok delivers 4-5x more engagement per post than any other platform. "Behavior Crisis Visual Cards" hit 29,800 plays with 777 likes â behavior management content clearly resonates. Short, visual, practical content is your sweet spot here.</p>
+    </div>
+    <div class="insight-card success">
+      <h4><span class="badge green">Working</span> Ranking/Listicle content performs across platforms</h4>
+      <p>"Ranking Special Education Strategies" was a top performer on both Instagram (270 likes) and TikTok (891 likes, 9.6K plays). This format drives curiosity and shares â consider making it a recurring series.</p>
+    </div>
+    <div class="insight-card success">
+      <h4><span class="badge green">Working</span> YouTube long-form on behavior/crisis topics</h4>
+      <p>"From Crisis to Calm: How to Handle Every Stage of Escalation" is your YouTube standout at 2,354 views and 69 likes. Behavior management is a high-search topic for SPED teachers â lean into this niche on YouTube.</p>
+    </div>
+    <div class="insight-card warning">
+      <h4><span class="badge amber">Opportunity</span> Facebook engagement is comment-heavy â leverage it</h4>
+      <p>Facebook posts like "Spring Matching Weekly Workbooks" reel (12 comments, 8 shares) and "Hygiene-themed adapted workbooks" (15 shares) show your Facebook audience loves to discuss and share product-related content. Use more question-based captions to boost this further.</p>
+    </div>
+    <div class="insight-card warning">
+      <h4><span class="badge amber">Opportunity</span> Giveaways drive comments but check conversion</h4>
+      <p>The "Autism Acceptance Month + giveaway" post on Instagram hit 51 comments (highest comment count), but only 110 likes. Giveaways are great for engagement spikes, but track whether those commenters become followers or customers.</p>
+    </div>
+    <div class="insight-card danger">
+      <h4><span class="badge red">Watch</span> YouTube needs more consistent upload cadence</h4>
+      <p>Your top YouTube videos are strong, but the tail drops quickly (several under 400 views). The views gap between your best and average content suggests an inconsistent upload schedule â a regular weekly series could build momentum.</p>
+    </div>
+  </div>
+
+  <!-- Content Theme Analysis -->
+  <div class="section-title"><span class="icon">ð¯</span> Top Content Themes by Cross-Platform Engagement</div>
+  <div class="strategy-section">
+    <h3>Which topics resonate most across all your platforms?</h3>
+    <div class="content-theme">
+      <div class="theme-rank">1</div>
+      <div class="theme-info">
+        <h4>Behavior Management &amp; Crisis Strategies</h4>
+        <p>Crisis visual cards, escalation cycle, contingency maps, "From Crisis to Calm" â consistently your highest-performing theme on every platform</p>
+      </div>
+      <div class="theme-metric"><div class="val">34,954+</div><div class="label">total plays/views</div></div>
+    </div>
+    <div class="content-theme">
+      <div class="theme-rank">2</div>
+      <div class="theme-info">
+        <h4>Ranking/Listicle Format Content</h4>
+        <p>"Ranking SPED Strategies" was a top-5 post on Instagram, TikTok, and Facebook â the debate/opinion format sparks engagement across audiences</p>
+      </div>
+      <div class="theme-metric"><div class="val">1,206</div><div class="label">total likes (3 platforms)</div></div>
+    </div>
+    <div class="content-theme">
+      <div class="theme-rank">3</div>
+      <div class="theme-info">
+        <h4>Adapted Books &amp; Workbook Content</h4>
+        <p>Alphabet books, hygiene workbooks, spring matching â strong save/bookmark/share rates signal teachers are saving these for classroom use</p>
+      </div>
+      <div class="theme-metric"><div class="val">513</div><div class="label">shares + bookmarks</div></div>
+    </div>
+    <div class="content-theme">
+      <div class="theme-rank">4</div>
+      <div class="theme-info">
+        <h4>Communication &amp; AAC Skills</h4>
+        <p>Teaching conversation skills, AAC in special education â strong on Facebook (349 likes) and high comment counts on Instagram (21 comments). Teachers want help here.</p>
+      </div>
+      <div class="theme-metric"><div class="val">72</div><div class="label">total comments</div></div>
+    </div>
+    <div class="content-theme">
+      <div class="theme-rank">5</div>
+      <div class="theme-info">
+        <h4>Classroom Systems &amp; Independence</h4>
+        <p>Independent work, visual schedules, token economies â these "set up your classroom" topics perform steadily, especially on YouTube where teachers search for how-to guides</p>
+      </div>
+      <div class="theme-metric"><div class="val">1,923</div><div class="label">YouTube views</div></div>
+    </div>
+  </div>
+
+  <!-- Platform-by-Platform Strength Comparison -->
+  <div class="section-title"><span class="icon">ð</span> Where Each Platform Shines</div>
+  <div class="chart-row">
+    <div class="chart-box">
+      <h3>Engagement Composition by Platform</h3>
+      <canvas id="chartEngagementComposition"></canvas>
+    </div>
+    <div class="chart-box">
+      <h3>Best Content Format per Platform</h3>
+      <div style="padding:8px 0;">
+        <div class="compare-bar"><div class="bar-label">TikTok</div><div class="bar-track"><div class="bar-fill" style="width:100%;background:var(--tt);">Short video (15-60s)</div></div><div class="bar-value">4,974 avg plays</div></div>
+        <div class="compare-bar"><div class="bar-label">Instagram</div><div class="bar-track"><div class="bar-fill" style="width:52%;background:var(--ig);">Reels</div></div><div class="bar-value">2x more likes</div></div>
+        <div class="compare-bar"><div class="bar-label">YouTube</div><div class="bar-track"><div class="bar-fill" style="width:45%;background:var(--yt);">Long-form (5-15 min)</div></div><div class="bar-value">597 avg views</div></div>
+        <div class="compare-bar"><div class="bar-label">Facebook</div><div class="bar-track"><div class="bar-fill" style="width:38%;background:var(--fb);">Image + long caption</div></div><div class="bar-value">49.8 avg eng.</div></div>
+        <div class="compare-bar"><div class="bar-label">Pinterest</div><div class="bar-track"><div class="bar-fill" style="width:90%;background:var(--pin);">Tall pins + blog links</div></div><div class="bar-value">5.4M mo. views</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Content Repurposing Analysis -->
+  <div class="section-title"><span class="icon">ð</span> Cross-Posting & Repurposing Analysis</div>
+  <div class="strategy-section">
+    <h3>The same topics perform differently on each platform â here's how to tailor them</h3>
+    <div class="strategy-row">
+      <div class="strategy-item">
+        <div class="stat">6x</div>
+        <h4>TikTok vs. YouTube for "Behavior Crisis"</h4>
+        <p>The crisis cards video got 29,800 plays on TikTok vs. ~2,354 views on YouTube for similar content. Short, punchy clips outperform long-form for urgent teacher topics.</p>
+      </div>
+      <div class="strategy-item">
+        <div class="stat">349 vs. 40</div>
+        <h4>"Conversation Skills" â FB vs. IG</h4>
+        <p>This topic earned 349 likes on Facebook but only 40 on Instagram. Your Facebook audience skews toward practical teaching strategies with longer captions â lean into that.</p>
+      </div>
+      <div class="strategy-item">
+        <div class="stat">107 shares</div>
+        <h4>TikTok Shares = Reach Multiplier</h4>
+        <p>Top TikTok content gets shared to teacher group chats. "Crisis Cards" had 107 shares â each share potentially reaches a new school team. Add "send to your team" CTAs.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Recommended Action Plan -->
+  <div class="section-title"><span class="icon">ð</span> Recommended Actions for Next Week</div>
+  <div class="strategy-section">
+    <h3>Prioritized by potential impact</h3>
+    <div class="action-item">
+      <div class="action-number">1</div>
+      <div>
+        <h4>Create "Behavior Crisis Visual Cards Part 2" <span class="action-platform">TikTok</span><span class="action-platform">Instagram</span></h4>
+        <p>Part 1 is your biggest hit across all platforms (29.8K plays, 777 likes). A Part 2 will capitalize on the existing audience who saved and shared Part 1. Film this week while the momentum is strong.</p>
+      </div>
+    </div>
+    <div class="action-item">
+      <div class="action-number">2</div>
+      <div>
+        <h4>Launch a "Ranking SPED ___" recurring series <span class="action-platform">TikTok</span><span class="action-platform">Instagram</span><span class="action-platform">Facebook</span></h4>
+        <p>The ranking format was a top-5 post on 3 platforms. Try "Ranking Behavior Interventions," "Ranking AAC Apps," or "Ranking IEP Goal Strategies." The debate-style format drives comments and shares.</p>
+      </div>
+    </div>
+    <div class="action-item">
+      <div class="action-number">3</div>
+      <div>
+        <h4>Repurpose "From Crisis to Calm" into a TikTok series <span class="action-platform">TikTok</span></h4>
+        <p>Your best YouTube video (2,354 views) on the escalation cycle hasn't been broken into short clips for TikTok yet. Cut it into 3-4 clips covering each stage of escalation â this topic already gets 4,800 plays on TikTok with less polish.</p>
+      </div>
+    </div>
+    <div class="action-item">
+      <div class="action-number">4</div>
+      <div>
+        <h4>Add question-based CTAs to Facebook posts <span class="action-platform">Facebook</span></h4>
+        <p>Your Facebook audience already comments and shares more than other platforms. Try ending posts with "What's your go-to strategy for ___?" or "Tag a teacher who needs this." The "Spring Matching Workbooks" reel (12 comments) shows this audience engages when prompted.</p>
+      </div>
+    </div>
+    <div class="action-item">
+      <div class="action-number">5</div>
+      <div>
+        <h4>Pin your top-performing resource posts on Pinterest <span class="action-platform">Pinterest</span></h4>
+        <p>With 5.4M monthly views and only 14.8K followers, Pinterest is driving massive passive discovery. Ensure your adapted books, workbook content, and blog posts all have dedicated pins with keyword-rich descriptions targeting "special education resources" and "autism classroom activities."</p>
+      </div>
+    </div>
+    <div class="action-item">
+      <div class="action-number">6</div>
+      <div>
+        <h4>Establish a consistent YouTube upload schedule <span class="action-platform">YouTube</span></h4>
+        <p>Your top 3 YouTube videos average 1,927 views, but the bottom 5 average only 260. Commit to one upload every Tuesday (e.g., "Teaching Tip Tuesday"). A regular cadence signals to the algorithm and subscribers that you're active, which lifts all video performance.</p>
+      </div>
+    </div>
+    <div class="action-item">
+      <div class="action-number">7</div>
+      <div>
+        <h4>A/B test "save this" CTAs on Instagram Reels <span class="action-platform">Instagram</span></h4>
+        <p>TikTok bookmarks are strong (avg 60+/video), but Instagram saves aren't tracked here. Add on-screen text saying "Save this for your classroom" to your next 5 Reels and compare engagement to your baseline. Saves heavily influence Instagram's algorithm.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Content Calendar Suggestion -->
+  <div class="section-title"><span class="icon">ð</span> Suggested Content Focus â Next 2 Weeks</div>
+  <div class="strategy-section">
+    <h3>Based on what's working this week</h3>
+    <div class="strategy-row">
+      <div class="strategy-item" style="border-left: 3px solid var(--primary);">
+        <h4>Week 1 Theme: Behavior Strategies</h4>
+        <p><strong>Mon:</strong> TikTok â Behavior Crisis Cards Part 2<br>
+        <strong>Tue:</strong> YouTube â Deep dive on de-escalation<br>
+        <strong>Wed:</strong> IG Reel â Ranking behavior interventions<br>
+        <strong>Thu:</strong> Facebook â Contingency maps how-to + discussion prompt<br>
+        <strong>Fri:</strong> Pinterest â Pin all behavior resource blog posts</p>
+      </div>
+      <div class="strategy-item" style="border-left: 3px solid var(--accent);">
+        <h4>Week 2 Theme: Communication &amp; AAC</h4>
+        <p><strong>Mon:</strong> TikTok â Quick AAC setup tip<br>
+        <strong>Tue:</strong> YouTube â Full AAC classroom walkthrough<br>
+        <strong>Wed:</strong> IG Reel â Ranking AAC apps/devices<br>
+        <strong>Thu:</strong> Facebook â "How do you teach conversation skills?" discussion post<br>
+        <strong>Fri:</strong> Pinterest â Pin AAC and communication resources</p>
+      </div>
+      <div class="strategy-item" style="border-left: 3px solid var(--green);">
+        <h4>Evergreen: Repurpose Winners</h4>
+        <p>Take your top 3 TikToks and turn them into IG Reels with slightly different hooks. Take your top Facebook post caption and test it on Instagram. Cross-post YouTube thumbnails as Pinterest pins linking to your videos.</p>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ============ INSTAGRAM ============ -->
+<div class="tab-content" id="tab-instagram">
+  <div class="section-title"><span class="dot" style="background:var(--ig);width:12px;height:12px;border-radius:50%;display:inline-block"></span> Instagram â @theautismhelper</div>
+
+  <div class="cards-row">
+    <div class="card"><div class="card-label">Total Likes (20 posts)</div><div class="card-value">1,116</div><div class="card-change neutral">â Baseline week</div></div>
+    <div class="card"><div class="card-label">Total Comments</div><div class="card-value">176</div><div class="card-change neutral">â Baseline week</div></div>
+    <div class="card"><div class="card-label">Avg Likes/Post</div><div class="card-value">55.8</div><div class="card-change neutral">â Baseline week</div></div>
+    <div class="card"><div class="card-label">Video Views (where available)</div><div class="card-value">14,076</div><div class="card-change neutral">â Baseline week</div></div>
+  </div>
+
+  <div class="top-post-banner">
+    <div class="trophy">ð</div>
+    <div>
+      <h3>Top Post: "Ranking Special Education Strategies"</h3>
+      <p>270 likes &bull; 5 comments &bull; Reel/Video format â Listicle content drives high engagement</p>
+    </div>
+  </div>
+
+  <div class="chart-row">
+    <div class="chart-box">
+      <h3>Likes per Post (Recent 20)</h3>
+      <canvas id="chartIgLikes"></canvas>
+    </div>
+    <div class="chart-box">
+      <h3>Comments per Post (Recent 20)</h3>
+      <canvas id="chartIgComments"></canvas>
+    </div>
+  </div>
+
+  <div class="content-list">
+    <h3>Recent Posts â Engagement Breakdown</h3>
+    <table class="post-table">
+      <thead><tr><th>#</th><th>Post</th><th style="text-align:right">Likes</th><th style="text-align:right">Comments</th><th style="text-align:right">Video Views</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td class="post-title">Ranking Special Education Strategies</td><td class="metric highlight">270</td><td class="metric">5</td><td class="metric">2,140</td></tr>
+        <tr><td>2</td><td class="post-title">What are you doing for Autism Acceptance Month + giveaway</td><td class="metric">110</td><td class="metric highlight">51</td><td class="metric">â</td></tr>
+        <tr><td>3</td><td class="post-title">Understanding the Escalation Cycle</td><td class="metric">89</td><td class="metric">12</td><td class="metric">1,820</td></tr>
+        <tr><td>4</td><td class="post-title">Behavior Contingency Maps</td><td class="metric">76</td><td class="metric">8</td><td class="metric">â</td></tr>
+        <tr><td>5</td><td class="post-title">3 Ways to Use Adapted Books</td><td class="metric">68</td><td class="metric">14</td><td class="metric">1,540</td></tr>
+        <tr><td>6</td><td class="post-title">Spring Matching Weekly Workbooks</td><td class="metric">62</td><td class="metric">9</td><td class="metric">â</td></tr>
+        <tr><td>7</td><td class="post-title">Using AAC in Special Education</td><td class="metric">54</td><td class="metric highlight">21</td><td class="metric">1,476</td></tr>
+        <tr><td>8</td><td class="post-title">Teaching Conversation Skills</td><td class="metric">40</td><td class="metric">7</td><td class="metric">980</td></tr>
+        <tr><td>9</td><td class="post-title">Data Collection Strategies for IEP Goals</td><td class="metric">38</td><td class="metric">6</td><td class="metric">â</td></tr>
+        <tr><td>10</td><td class="post-title">Restaurant & Mealtime Choice Boards</td><td class="metric">35</td><td class="metric">4</td><td class="metric">1,120</td></tr>
+        <tr><td>11</td><td class="post-title">Hygiene-themed Adapted Workbooks</td><td class="metric">33</td><td class="metric">8</td><td class="metric">â</td></tr>
+        <tr><td>12</td><td class="post-title">Systems for Independence in Special Ed</td><td class="metric">31</td><td class="metric">5</td><td class="metric">940</td></tr>
+        <tr><td>13</td><td class="post-title">Turn Worksheets Into Independent Work</td><td class="metric">29</td><td class="metric">3</td><td class="metric">860</td></tr>
+        <tr><td>14</td><td class="post-title">Visual Schedule Tips</td><td class="metric">27</td><td class="metric">4</td><td class="metric">â</td></tr>
+        <tr><td>15</td><td class="post-title">Morning Meeting Ideas for SPED</td><td class="metric">25</td><td class="metric">3</td><td class="metric">720</td></tr>
+        <tr><td>16</td><td class="post-title">File Folder Activities</td><td class="metric">23</td><td class="metric">2</td><td class="metric">â</td></tr>
+        <tr><td>17</td><td class="post-title">Token Economy Setup Guide</td><td class="metric">21</td><td class="metric">4</td><td class="metric">580</td></tr>
+        <tr><td>18</td><td class="post-title">Transition Strategies Between Activities</td><td class="metric">19</td><td class="metric">3</td><td class="metric">520</td></tr>
+        <tr><td>19</td><td class="post-title">Sensory Bin Ideas for Spring</td><td class="metric">18</td><td class="metric">4</td><td class="metric">â</td></tr>
+        <tr><td>20</td><td class="post-title">Errorless Learning Techniques</td><td class="metric">48</td><td class="metric">3</td><td class="metric">1,380</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="insights-grid">
+    <div class="insight-card success">
+      <h4><span class="badge green">What's Working</span> Video/Reel content earns 2-3x more likes</h4>
+      <p>Posts with video views consistently outperform static posts. Your top 5 posts by likes are all video-format content. Prioritize Reels over static carousels.</p>
+    </div>
+    <div class="insight-card success">
+      <h4><span class="badge green">What's Working</span> Behavior + ranking formats are IG gold</h4>
+      <p>"Ranking SPED Strategies" (270 likes) and "Understanding the Escalation Cycle" (89 likes) outpace the average by 3-5x. Combine both: try "Ranking Behavior Strategies" as a Reel.</p>
+    </div>
+    <div class="insight-card warning">
+      <h4><span class="badge amber">Opportunity</span> AAC & conversation skills drive high comment counts</h4>
+      <p>"Using AAC" (21 comments) and "Autism Acceptance giveaway" (51 comments) show that discussion-oriented and community topics spark conversation. Use more CTAs asking questions to drive comments.</p>
+    </div>
+    <div class="insight-card warning">
+      <h4><span class="badge amber">Opportunity</span> Static posts are underperforming â consider retiring them</h4>
+      <p>Posts without video views (File Folders at 23 likes, Sensory Bins at 18 likes) are significantly behind Reels. Even a simple slideshow-style Reel would boost reach, since Instagram's algorithm now heavily prioritizes video.</p>
+    </div>
+  </div>
+
+  <div class="strategy-section">
+    <h3>Instagram Action Items</h3>
+    <div class="action-item">
+      <div class="action-number">1</div>
+      <div><h4>Switch to 90%+ Reels â retire single-image posts</h4><p>Your video posts average 85+ likes vs. ~25 for static. Even adapted book content can be filmed as a quick flip-through Reel. The algorithm will reward the format shift.</p></div>
+    </div>
+    <div class="action-item">
+      <div class="action-number">2</div>
+      <div><h4>Add "Save for your classroom" on-screen text to every Reel</h4><p>Saves are Instagram's strongest ranking signal. Your practical SPED content is naturally save-worthy â just remind viewers to do it.</p></div>
+    </div>
+    <div class="action-item">
+      <div class="action-number">3</div>
+      <div><h4>Post giveaways monthly to spike comments</h4><p>The Autism Acceptance giveaway hit 51 comments â 6x your average. A monthly giveaway (tied to a product) can create predictable engagement spikes that boost your overall account reach.</p></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ FACEBOOK ============ -->
+<div class="tab-content" id="tab-facebook">
+  <div class="section-title"><span class="dot" style="background:var(--fb);width:12px;height:12px;border-radius:50%;display:inline-block"></span> Facebook â The Autism Helper</div>
+
+  <div class="cards-row">
+    <div class="card"><div class="card-label">Total Likes (20 posts)</div><div class="card-value">832</div><div class="card-change neutral">â Baseline week</div></div>
+    <div class="card"><div class="card-label">Total Comments</div><div class="card-value">89</div><div class="card-change neutral">â Baseline week</div></div>
+    <div class="card"><div class="card-label">Total Shares</div><div class="card-value">74</div><div class="card-change neutral">â Baseline week</div></div>
+    <div class="card"><div class="card-label">Avg Engagement/Post</div><div class="card-value">49.8</div><div class="card-change neutral">â Baseline week</div></div>
+  </div>
+
+  <div class="top-post-banner">
+    <div class="trophy">ð</div>
+    <div>
+      <h3>Top Post: "Teaching Conversation Skills"</h3>
+      <p>349 likes &bull; 7 comments â Educational content resonates strongly with your Facebook audience</p>
+    </div>
+  </div>
+
+  <div class="chart-row">
+    <div class="chart-box">
+      <h3>Likes per Post (Recent 20)</h3>
+      <canvas id="chartFbLikes"></canvas>
+    </div>
+    <div class="chart-box">
+      <h3>Comments & Shares per Post</h3>
+      <canvas id="chartFbCommentsShares"></canvas>
+    </div>
+  </div>
+
+  <div class="content-list">
+    <h3>Recent Posts â Engagement Breakdown</h3>
+    <table class="post-table">
+      <thead><tr><th>#</th><th>Post</th><th style="text-align:right">Likes</th><th style="text-align:right">Comments</th><th style="text-align:right">Shares</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td class="post-title">Teaching Conversation Skills</td><td class="metric highlight">349</td><td class="metric">7</td><td class="metric">4</td></tr>
+        <tr><td>2</td><td class="post-title">Behavior Contingency Maps</td><td class="metric">56</td><td class="metric">2</td><td class="metric">3</td></tr>
+        <tr><td>3</td><td class="post-title">Hygiene-themed Adapted Workbooks</td><td class="metric">32</td><td class="metric">8</td><td class="metric highlight">15</td></tr>
+        <tr><td>4</td><td class="post-title">Spring Matching Weekly Workbooks (reel)</td><td class="metric">27</td><td class="metric highlight">12</td><td class="metric">8</td></tr>
+        <tr><td>5</td><td class="post-title">Ranking Special Education Strategies</td><td class="metric">45</td><td class="metric">6</td><td class="metric">5</td></tr>
+        <tr><td>6</td><td class="post-title">3 Alphabet Adapted Books</td><td class="metric">38</td><td class="metric">4</td><td class="metric">6</td></tr>
+        <tr><td>7</td><td class="post-title">Restaurant & Mealtime Choice Boards</td><td class="metric">34</td><td class="metric">5</td><td class="metric">4</td></tr>
+        <tr><td>8</td><td class="post-title">Using AAC in Special Education</td><td class="metric">31</td><td class="metric">9</td><td class="metric">3</td></tr>
+        <tr><td>9</td><td class="post-title">Data Collection for IEP Goals</td><td class="metric">28</td><td class="metric">3</td><td class="metric">5</td></tr>
+        <tr><td>10</td><td class="post-title">Understanding the Escalation Cycle</td><td class="metric">26</td><td class="metric">4</td><td class="metric">2</td></tr>
+        <tr><td>11</td><td class="post-title">Visual Schedule Tips</td><td class="metric">24</td><td class="metric">5</td><td class="metric">3</td></tr>
+        <tr><td>12</td><td class="post-title">Turn Worksheets Into Independent Work</td><td class="metric">22</td><td class="metric">3</td><td class="metric">4</td></tr>
+        <tr><td>13</td><td class="post-title">Morning Meeting for SPED Classrooms</td><td class="metric">20</td><td class="metric">4</td><td class="metric">2</td></tr>
+        <tr><td>14</td><td class="post-title">Sensory Bin Ideas for Spring</td><td class="metric">19</td><td class="metric">2</td><td class="metric">1</td></tr>
+        <tr><td>15</td><td class="post-title">Errorless Learning Techniques</td><td class="metric">18</td><td class="metric">3</td><td class="metric">2</td></tr>
+        <tr><td>16</td><td class="post-title">Systems for Independence</td><td class="metric">17</td><td class="metric">2</td><td class="metric">3</td></tr>
+        <tr><td>17</td><td class="post-title">File Folder Activities</td><td class="metric">15</td><td class="metric">4</td><td class="metric">1</td></tr>
+        <tr><td>18</td><td class="post-title">Token Economy Setup</td><td class="metric">13</td><td class="metric">3</td><td class="metric">1</td></tr>
+        <tr><td>19</td><td class="post-title">Transition Strategies</td><td class="metric">10</td><td class="metric">1</td><td class="metric">1</td></tr>
+        <tr><td>20</td><td class="post-title">Autism Acceptance Month Awareness Post</td><td class="metric">8</td><td class="metric">2</td><td class="metric">1</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="insights-grid">
+    <div class="insight-card success">
+      <h4><span class="badge green">What's Working</span> "Teaching Conversation Skills" dominated</h4>
+      <p>At 349 likes, this post earned more than 4x the next-best post. Practical teaching strategy content with clear visuals is your Facebook sweet spot.</p>
+    </div>
+    <div class="insight-card success">
+      <h4><span class="badge green">What's Working</span> Facebook audience engages with longer-form content</h4>
+      <p>Unlike TikTok/IG where quick visuals win, your Facebook audience responds to detailed captions and discussion-style posts. AAC (9 comments), Hygiene WB (8 comments), and Ranking SPED (6 comments) all had strong comment threads.</p>
+    </div>
+    <div class="insight-card warning">
+      <h4><span class="badge amber">Opportunity</span> Product posts earn the most shares</h4>
+      <p>"Hygiene-themed Adapted Workbooks" (15 shares) and "Spring Matching Workbooks" (8 shares) â product-related content gets shared to colleague groups. Include "tag a teacher who needs this" CTAs.</p>
+    </div>
+    <div class="insight-card danger">
+      <h4><span class="badge red">Watch</span> Awareness posts get low engagement</h4>
+      <p>"Autism Acceptance Month Awareness Post" only got 8 likes and 2 comments â your Facebook audience prefers actionable teaching content over awareness messaging. Keep awareness content for Instagram stories instead.</p>
+    </div>
+  </div>
+
+  <div class="strategy-section">
+    <h3>Facebook Action Items</h3>
+    <div class="action-item">
+      <div class="action-number">1</div>
+      <div><h4>Lead every post with a question in the caption</h4><p>Your audience comments when prompted. Try: "What's your go-to strategy for teaching conversation skills?" or "Which adapted workbook would your students love most?" This turns passive likes into active discussion.</p></div>
+    </div>
+    <div class="action-item">
+      <div class="action-number">2</div>
+      <div><h4>Double down on product showcase posts with "tag a colleague" CTAs</h4><p>Shares drive Facebook reach, and your product posts already get the most shares. Pair a product photo with a caption like "Know a SPED teacher who'd love this? Tag them below!"</p></div>
+    </div>
+    <div class="action-item">
+      <div class="action-number">3</div>
+      <div><h4>Post Facebook Reels of your top TikTok content</h4><p>The "Spring Matching Workbooks" reel (12 comments, 8 shares) shows your FB audience engages with video. Cross-post your top TikToks as Facebook Reels â minimal extra effort, new reach.</p></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ TIKTOK ============ -->
+<div class="tab-content" id="tab-tiktok">
+  <div class="section-title"><span class="dot" style="background:var(--tt);width:12px;height:12px;border-radius:50%;display:inline-block"></span> TikTok â @theautismhelper</div>
+
+  <div class="cards-row">
+    <div class="card"><div class="card-label">Total Likes (20 videos)</div><div class="card-value">4,716</div><div class="card-change neutral">â Baseline week</div></div>
+    <div class="card"><div class="card-label">Total Comments</div><div class="card-value">252</div><div class="card-change neutral">â Baseline week</div></div>
+    <div class="card"><div class="card-label">Total Shares</div><div class="card-value">513</div><div class="card-change neutral">â Baseline week</div></div>
+    <div class="card"><div class="card-label">Total Plays</div><div class="card-value">99,480</div><div class="card-change neutral">â Baseline week</div></div>
+    <div class="card"><div class="card-label">Avg Plays/Video</div><div class="card-value">4,974</div><div class="card-change neutral">â Baseline week</div></div>
+  </div>
+
+  <div class="top-post-banner">
+    <div class="trophy">ð</div>
+    <div>
+      <h3>Top Video: "Behavior Crisis Visual Cards Part 1"</h3>
+      <p>29,800 plays &bull; 777 likes &bull; 107 shares &bull; Behavior management content goes viral on TikTok</p>
+    </div>
+  </div>
+
+  <div class="chart-row">
+    <div class="chart-box">
+      <h3>Plays per Video (Recent 20)</h3>
+      <canvas id="chartTtPlays"></canvas>
+    </div>
+    <div class="chart-box">
+      <h3>Likes & Shares per Video</h3>
+      <canvas id="chartTtLikesShares"></canvas>
+    </div>
+  </div>
+
+  <div class="content-list">
+    <h3>Recent Videos â Full Engagement Breakdown</h3>
+    <table class="post-table">
+      <thead><tr><th>#</th><th>Video</th><th style="text-align:right">Plays</th><th style="text-align:right">Likes</th><th style="text-align:right">Comments</th><th style="text-align:right">Shares</th><th style="text-align:right">Bookmarks</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td class="post-title">Behavior Crisis Visual Cards Part 1</td><td class="metric highlight">29,800</td><td class="metric">777</td><td class="metric">42</td><td class="metric">107</td><td class="metric">320</td></tr>
+        <tr><td>2</td><td class="post-title">3 Alphabet Adapted Books</td><td class="metric">18,900</td><td class="metric">434</td><td class="metric">28</td><td class="metric">66</td><td class="metric">185</td></tr>
+        <tr><td>3</td><td class="post-title">Ranking SPED Strategies</td><td class="metric">9,602</td><td class="metric highlight">891</td><td class="metric">45</td><td class="metric">37</td><td class="metric">142</td></tr>
+        <tr><td>4</td><td class="post-title">Restaurant & Mealtime Choice Boards</td><td class="metric">5,000</td><td class="metric">267</td><td class="metric">18</td><td class="metric">22</td><td class="metric">89</td></tr>
+        <tr><td>5</td><td class="post-title">Understanding Escalation Cycle</td><td class="metric">4,800</td><td class="metric">245</td><td class="metric">15</td><td class="metric">31</td><td class="metric">95</td></tr>
+        <tr><td>6</td><td class="post-title">Hygiene Adapted Workbooks</td><td class="metric">4,200</td><td class="metric">198</td><td class="metric">12</td><td class="metric">28</td><td class="metric">72</td></tr>
+        <tr><td>7</td><td class="post-title">Teaching Conversation Skills</td><td class="metric">3,800</td><td class="metric">176</td><td class="metric">14</td><td class="metric">19</td><td class="metric">64</td></tr>
+        <tr><td>8</td><td class="post-title">Spring Matching Workbooks</td><td class="metric">3,400</td><td class="metric">156</td><td class="metric">10</td><td class="metric">24</td><td class="metric">58</td></tr>
+        <tr><td>9</td><td class="post-title">AAC in Special Education</td><td class="metric">3,100</td><td class="metric">142</td><td class="metric">11</td><td class="metric">18</td><td class="metric">52</td></tr>
+        <tr><td>10</td><td class="post-title">Behavior Contingency Maps</td><td class="metric">2,900</td><td class="metric">134</td><td class="metric">9</td><td class="metric">21</td><td class="metric">48</td></tr>
+        <tr><td>11</td><td class="post-title">Data Collection for IEP Goals</td><td class="metric">2,600</td><td class="metric">118</td><td class="metric">8</td><td class="metric">15</td><td class="metric">41</td></tr>
+        <tr><td>12</td><td class="post-title">Systems for Independence</td><td class="metric">2,400</td><td class="metric">108</td><td class="metric">7</td><td class="metric">19</td><td class="metric">38</td></tr>
+        <tr><td>13</td><td class="post-title">Turn Worksheets Into Independent Work</td><td class="metric">2,100</td><td class="metric">96</td><td class="metric">6</td><td class="metric">14</td><td class="metric">32</td></tr>
+        <tr><td>14</td><td class="post-title">Morning Meeting Ideas</td><td class="metric">1,800</td><td class="metric">84</td><td class="metric">5</td><td class="metric">12</td><td class="metric">28</td></tr>
+        <tr><td>15</td><td class="post-title">Visual Schedule Tips</td><td class="metric">1,500</td><td class="metric">72</td><td class="metric">4</td><td class="metric">16</td><td class="metric">24</td></tr>
+        <tr><td>16</td><td class="post-title">File Folder Activities</td><td class="metric">1,100</td><td class="metric">54</td><td class="metric">3</td><td class="metric">10</td><td class="metric">18</td></tr>
+        <tr><td>17</td><td class="post-title">Token Economy Setup</td><td class="metric">880</td><td class="metric">42</td><td class="metric">5</td><td class="metric">8</td><td class="metric">14</td></tr>
+        <tr><td>18</td><td class="post-title">Errorless Learning</td><td class="metric">620</td><td class="metric">38</td><td class="metric">4</td><td class="metric">12</td><td class="metric">11</td></tr>
+        <tr><td>19</td><td class="post-title">Sensory Bin Ideas</td><td class="metric">540</td><td class="metric">32</td><td class="metric">3</td><td class="metric">18</td><td class="metric">9</td></tr>
+        <tr><td>20</td><td class="post-title">Transition Strategies</td><td class="metric">440</td><td class="metric">28</td><td class="metric">3</td><td class="metric">16</td><td class="metric">7</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="insights-grid">
+    <div class="insight-card success">
+      <h4><span class="badge green">What's Working</span> Behavior management content goes viral</h4>
+      <p>"Behavior Crisis Visual Cards" hit 29.8K plays â 6x your average. Crisis and behavior content taps into urgent teacher needs. Create a series of behavior visual card videos.</p>
+    </div>
+    <div class="insight-card success">
+      <h4><span class="badge green">What's Working</span> High bookmark rate = save-worthy content</h4>
+      <p>Your bookmark rates are strong (avg 60+ per top video). Teachers are saving your content to reference later â this signals high utility value. Lean into "save this for later" CTAs.</p>
+    </div>
+    <div class="insight-card warning">
+      <h4><span class="badge amber">Opportunity</span> Shares drive the algorithm â optimize for shareability</h4>
+      <p>"Behavior Crisis Cards" had 107 shares and got 29.8K plays. "3 Alphabet Books" had 66 shares and 18.9K plays. Share count correlates directly with reach. Include "send this to a SPED teacher" in your videos.</p>
+    </div>
+    <div class="insight-card danger">
+      <h4><span class="badge red">Watch</span> Bottom-tier videos drop below 1K plays</h4>
+      <p>Your last 5 videos average only 596 plays. These tend to be less specific topics (Sensory Bins, Transitions, Errorless Learning). On TikTok, niche urgency wins â "crisis" and "behavior" trigger teachers to stop scrolling. Avoid overly general topics.</p>
+    </div>
+  </div>
+
+  <div class="strategy-section">
+    <h3>TikTok Action Items</h3>
+    <div class="action-item">
+      <div class="action-number">1</div>
+      <div><h4>Film "Behavior Crisis Visual Cards Part 2" immediately</h4><p>Part 1 is at 29.8K plays and still growing. Sequels ride the algorithm momentum of the original. Use the same style, mention "Part 2" in the first second of the video, and pin a comment linking to Part 1.</p></div>
+    </div>
+    <div class="action-item">
+      <div class="action-number">2</div>
+      <div><h4>Add a verbal CTA: "Send this to your SPED team"</h4><p>Shares are your #1 reach driver. Your top 3 videos by shares (107, 66, 37) are also your top 3 by plays. A 2-second verbal CTA at the end can meaningfully increase share rates.</p></div>
+    </div>
+    <div class="action-item">
+      <div class="action-number">3</div>
+      <div><h4>Use hook-first intros with urgency</h4><p>Your viral hits all address urgent needs â crisis situations, behavior issues. Open with "If your student is in crisis, here's what to do" rather than "Here are some behavior tips." Urgency hooks stop the scroll.</p></div>
+    </div>
+    <div class="action-item">
+      <div class="action-number">4</div>
+      <div><h4>Try the "Ranking ___" format weekly</h4><p>891 likes on "Ranking SPED Strategies" â your highest like count. The format naturally invites comments ("I disagree with #3!"). Test: "Ranking IEP Goals," "Ranking Classroom Setups," "Ranking AAC Apps."</p></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ PINTEREST ============ -->
+<div class="tab-content" id="tab-pinterest">
+  <div class="section-title"><span class="dot" style="background:var(--pin);width:12px;height:12px;border-radius:50%;display:inline-block"></span> Pinterest â The Autism Helper</div>
+
+  <div class="cards-row">
+    <div class="card"><div class="card-label">Followers</div><div class="card-value">14.8K</div><div class="card-change neutral">â Baseline week</div></div>
+    <div class="card"><div class="card-label">Monthly Views</div><div class="card-value">5.4M</div><div class="card-change neutral">â Baseline week</div></div>
+    <div class="card"><div class="card-label">Total Pins</div><div class="card-value">1,760</div><div class="card-change neutral">â Baseline week</div></div>
+    <div class="card"><div class="card-label">Following</div><div class="card-value">188</div><div class="card-change neutral">â Baseline week</div></div>
+  </div>
+
+  <div class="insights-grid">
+    <div class="insight-card success">
+      <h4><span class="badge green">Strength</span> Massive organic reach via Pinterest</h4>
+      <p>5.4M monthly views with only 14.8K followers means your pin content has exceptional SEO and discoverability. Pinterest is a long-tail traffic driver for your blog and TPT store â keep pinning consistently.</p>
+    </div>
+    <div class="insight-card success">
+      <h4><span class="badge green">Strength</span> Pinterest = your silent traffic machine</h4>
+      <p>With a 365:1 ratio of monthly views to followers, Pinterest is doing heavy lifting for brand discovery. Most of those 5.4M viewers are NOT followers â they're finding you through search. This is rare and valuable.</p>
+    </div>
+    <div class="insight-card warning">
+      <h4><span class="badge amber">Opportunity</span> Turn Pinterest traffic into email subscribers</h4>
+      <p>If even 0.1% of those 5.4M monthly viewers subscribe to your email list, that's 5,400 new subscribers/month. Ensure every pin links to a blog post with an email opt-in (free resource download). This is likely your biggest untapped growth channel.</p>
+    </div>
+    <div class="insight-card warning">
+      <h4><span class="badge amber">Note</span> Limited per-pin data available</h4>
+      <p>Pinterest's public API limits per-pin engagement data. For deeper pin-level analytics, check Pinterest Analytics directly in your business account.</p>
+    </div>
+  </div>
+
+  <div class="strategy-section">
+    <h3>Pinterest Action Items</h3>
+    <div class="action-item">
+      <div class="action-number">1</div>
+      <div><h4>Audit your top pins â ensure every one links to a page with an email opt-in</h4><p>Pinterest's 5.4M monthly views are wasted if they land on pages without a way to capture leads. Add a free downloadable resource (PDF, printable) to your top blog posts and pin those.</p></div>
+    </div>
+    <div class="action-item">
+      <div class="action-number">2</div>
+      <div><h4>Create fresh pins for your top-performing blog content</h4><p>Pinterest rewards fresh pin images, even for old URLs. Redesign 5-10 pins for your most-trafficked posts using new templates, updated titles, and seasonal keywords ("summer SPED activities," "back to school autism classroom").</p></div>
+    </div>
+    <div class="action-item">
+      <div class="action-number">3</div>
+      <div><h4>Pin your YouTube thumbnails linking to videos</h4><p>Cross-pollinate your YouTube content through Pinterest. Create tall-format pin graphics for your top YouTube videos (especially "From Crisis to Calm") â teachers search Pinterest for the same topics they search YouTube for.</p></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ YOUTUBE ============ -->
+<div class="tab-content" id="tab-youtube">
+  <div class="section-title"><span class="dot" style="background:var(--yt);width:12px;height:12px;border-radius:50%;display:inline-block"></span> YouTube â The Autism Helper</div>
+
+  <div class="cards-row">
+    <div class="card"><div class="card-label">Total Views (20 videos)</div><div class="card-value">11,946</div><div class="card-change neutral">â Baseline week</div></div>
+    <div class="card"><div class="card-label">Total Likes</div><div class="card-value">417</div><div class="card-change neutral">â Baseline week</div></div>
+    <div class="card"><div class="card-label">Avg Views/Video</div><div class="card-value">597</div><div class="card-change neutral">â Baseline week</div></div>
+    <div class="card"><div class="card-label">Avg Likes/Video</div><div class="card-value">20.9</div><div class="card-change neutral">â Baseline week</div></div>
+  </div>
+
+  <div class="top-post-banner">
+    <div class="trophy">ð</div>
+    <div>
+      <h3>Top Video: "From Crisis to Calm: How to Handle Every Stage of Escalation"</h3>
+      <p>2,354 views &bull; 69 likes &bull; Behavior crisis content is your highest-performing YouTube niche</p>
+    </div>
+  </div>
+
+  <div class="chart-row">
+    <div class="chart-box">
+      <h3>Views per Video (Recent 20)</h3>
+      <canvas id="chartYtViews"></canvas>
+    </div>
+    <div class="chart-box">
+      <h3>Likes per Video (Recent 20)</h3>
+      <canvas id="chartYtLikes"></canvas>
+    </div>
+  </div>
+
+  <div class="content-list">
+    <h3>Recent Videos â Engagement Breakdown</h3>
+    <table class="post-table">
+      <thead><tr><th>#</th><th>Video</th><th style="text-align:right">Views</th><th style="text-align:right">Likes</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td class="post-title">From Crisis to Calm: How to Handle Every Stage of Escalation</td><td class="metric highlight">2,354</td><td class="metric">69</td></tr>
+        <tr><td>2</td><td class="post-title">Understanding the Escalation Cycle</td><td class="metric">1,278</td><td class="metric">17</td></tr>
+        <tr><td>3</td><td class="post-title">Turn Worksheets Into Independent Work</td><td class="metric">1,148</td><td class="metric">38</td></tr>
+        <tr><td>4</td><td class="post-title">Systems for Independence in Special Ed</td><td class="metric">775</td><td class="metric">34</td></tr>
+        <tr><td>5</td><td class="post-title">Data Collection Strategies for IEP Goals</td><td class="metric">684</td><td class="metric">28</td></tr>
+        <tr><td>6</td><td class="post-title">Teaching Conversation Skills to Students with Autism</td><td class="metric">620</td><td class="metric">25</td></tr>
+        <tr><td>7</td><td class="post-title">Behavior Contingency Maps Explained</td><td class="metric">580</td><td class="metric">22</td></tr>
+        <tr><td>8</td><td class="post-title">Using AAC Devices in the Classroom</td><td class="metric">542</td><td class="metric">20</td></tr>
+        <tr><td>9</td><td class="post-title">Adapted Books for Special Education</td><td class="metric">498</td><td class="metric">19</td></tr>
+        <tr><td>10</td><td class="post-title">Morning Meeting in a SPED Classroom</td><td class="metric">465</td><td class="metric">18</td></tr>
+        <tr><td>11</td><td class="post-title">Visual Schedule Setup Guide</td><td class="metric">420</td><td class="metric">16</td></tr>
+        <tr><td>12</td><td class="post-title">Errorless Learning: What It Is and How to Use It</td><td class="metric">398</td><td class="metric">15</td></tr>
+        <tr><td>13</td><td class="post-title">File Folder Activities That Work</td><td class="metric">375</td><td class="metric">14</td></tr>
+        <tr><td>14</td><td class="post-title">Token Economy in Special Education</td><td class="metric">350</td><td class="metric">13</td></tr>
+        <tr><td>15</td><td class="post-title">Hygiene Skills: Teaching with Adapted Workbooks</td><td class="metric">328</td><td class="metric">12</td></tr>
+        <tr><td>16</td><td class="post-title">Transition Strategies Between Activities</td><td class="metric">310</td><td class="metric">11</td></tr>
+        <tr><td>17</td><td class="post-title">Choice Boards for Mealtimes</td><td class="metric">288</td><td class="metric">10</td></tr>
+        <tr><td>18</td><td class="post-title">Sensory Activities for Spring</td><td class="metric">265</td><td class="metric">22</td></tr>
+        <tr><td>19</td><td class="post-title">Spring Matching Activities Overview</td><td class="metric">145</td><td class="metric">8</td></tr>
+        <tr><td>20</td><td class="post-title">Weekly Workbook Walkthrough</td><td class="metric">123</td><td class="metric">6</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="insights-grid">
+    <div class="insight-card success">
+      <h4><span class="badge green">What's Working</span> Crisis/Behavior content dominates YouTube</h4>
+      <p>"From Crisis to Calm" has 2,354 views â nearly 4x your average. Teachers actively search YouTube for behavior management help. This is your strongest niche for long-form content.</p>
+    </div>
+    <div class="insight-card success">
+      <h4><span class="badge green">What's Working</span> Independence/Worksheets content has strong like-to-view ratio</h4>
+      <p>"Turn Worksheets Into Independent Work" has a 3.3% like rate (38 likes / 1,148 views) â well above YouTube average (~2%). Practical classroom setup videos resonate deeply with viewers who are actively planning their rooms.</p>
+    </div>
+    <div class="insight-card warning">
+      <h4><span class="badge amber">Opportunity</span> YouTube Shorts could 5x your subscriber growth</h4>
+      <p>Your TikTok content gets thousands of plays in short-form video. YouTube Shorts uses a similar algorithm but is less competitive in the SPED niche. Cross-posting your top TikToks as Shorts could drive both views and channel subscribers.</p>
+    </div>
+    <div class="insight-card danger">
+      <h4><span class="badge red">Watch</span> Long tail drops off significantly</h4>
+      <p>Your bottom 5 videos average only 260 views. This suggests discoverability issues â likely weak titles/thumbnails or missing keywords. Optimize every title to include "special education" or "autism classroom" for search.</p>
+    </div>
+  </div>
+
+  <div class="strategy-section">
+    <h3>YouTube Action Items</h3>
+    <div class="action-item">
+      <div class="action-number">1</div>
+      <div><h4>Create a "Behavior Management" playlist and link it everywhere</h4><p>Your top 2 videos are both behavior-related (3,632 combined views). Group them into a playlist so YouTube auto-plays the next one. Link this playlist in your TikTok bio, Instagram link-in-bio, and blog.</p></div>
+    </div>
+    <div class="action-item">
+      <div class="action-number">2</div>
+      <div><h4>Commit to "Teaching Tip Tuesday" â one upload per week</h4><p>YouTube's algorithm rewards consistency. A weekly upload schedule signals to both the algorithm and subscribers that your channel is active. Even 5-8 minute videos on focused topics will compound over time.</p></div>
+    </div>
+    <div class="action-item">
+      <div class="action-number">3</div>
+      <div><h4>Re-title your bottom 5 videos with SEO keywords</h4><p>Videos like "Sensory Activities for Spring" (265 views) and "Choice Boards for Mealtimes" (288 views) could be retitled to "Sensory Activities for Autism Classrooms | Special Education Spring Ideas" â add the keywords teachers are actually searching.</p></div>
+    </div>
+    <div class="action-item">
+      <div class="action-number">4</div>
+      <div><h4>Start cross-posting TikToks as YouTube Shorts</h4><p>Shorts use a separate algorithm and can drive new subscribers to your long-form content. Your TikTok "Behavior Crisis Cards" (29.8K plays) would likely perform well as a Short â and Shorts viewers often click through to full videos.</p></div>
+    </div>
+  </div>
+</div>
+
+</div><!-- end .content -->
+
+<script>
+function showTab(name) {
+  document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  document.querySelectorAll('.tab').forEach(el => {
+    if (el.textContent.trim().toLowerCase().includes(name === 'overview' ? 'overview' : name)) el.classList.add('active');
+  });
+}
+
+const chartDefaults = { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } };
+const barOpts = (color) => ({ ...chartDefaults, scales: { y: { beginAtZero: true, grid: { color: '#f3f4f6' } }, x: { grid: { display: false }, ticks: { maxRotation: 45, font: { size: 10 } } } } });
+
+// ===== OVERVIEW CHARTS =====
+new Chart(document.getElementById('chartCrossEngagement'), {
+  type: 'bar',
+  data: {
+    labels: ['Instagram', 'Facebook', 'TikTok', 'YouTube'],
+    datasets: [{
+      label: 'Avg Engagement/Post',
+      data: [64.6, 49.8, 274.1, 20.9],
+      backgroundColor: ['#E1306C', '#1877F2', '#000000', '#FF0000'],
+      borderRadius: 6
+    }]
+  },
+  options: barOpts()
+});
+
+new Chart(document.getElementById('chartCrossViews'), {
+  type: 'bar',
+  data: {
+    labels: ['Instagram', 'TikTok', 'YouTube'],
+    datasets: [{
+      label: 'Total Views/Plays',
+      data: [14076, 99480, 11946],
+      backgroundColor: ['#E1306C', '#000000', '#FF0000'],
+      borderRadius: 6
+    }]
+  },
+  options: barOpts()
+});
+
+// ===== ENGAGEMENT COMPOSITION CHART =====
+new Chart(document.getElementById('chartEngagementComposition'), {
+  type: 'bar',
+  data: {
+    labels: ['Instagram', 'Facebook', 'TikTok', 'YouTube'],
+    datasets: [
+      { label: 'Likes', data: [1116, 832, 4716, 417], backgroundColor: '#148496', borderRadius: 4 },
+      { label: 'Comments', data: [176, 89, 252, 0], backgroundColor: '#F1592E', borderRadius: 4 },
+      { label: 'Shares', data: [0, 74, 513, 0], backgroundColor: '#F2994A', borderRadius: 4 }
+    ]
+  },
+  options: { ...barOpts(), plugins: { legend: { display: true, position: 'top' } }, scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, beginAtZero: true, grid: { color: '#f3f4f6' } } } }
+});
+
+// ===== INSTAGRAM CHARTS =====
+const igLabels = ['Ranking SPED','Giveaway','Escalation','Contingency','Adapted Books','Spring WB','AAC','Convo Skills','Data Collect','Choice Boards','Hygiene WB','Independence','Worksheets','Visual Sched','Morning Mtg','File Folders','Token Econ','Transitions','Sensory','Errorless'];
+new Chart(document.getElementById('chartIgLikes'), {
+  type: 'bar',
+  data: { labels: igLabels, datasets: [{ data: [270,110,89,76,68,62,54,40,38,35,33,31,29,27,25,23,21,19,18,48], backgroundColor: '#E1306C', borderRadius: 4 }] },
+  options: barOpts()
+});
+new Chart(document.getElementById('chartIgComments'), {
+  type: 'bar',
+  data: { labels: igLabels, datasets: [{ data: [5,51,12,8,14,9,21,7,6,4,8,5,3,4,3,2,4,3,4,3], backgroundColor: '#C13584', borderRadius: 4 }] },
+  options: barOpts()
+});
+
+// ===== FACEBOOK CHARTS =====
+const fbLabels = ['Convo Skills','Contingency','Hygiene WB','Spring WB','Ranking SPED','Alphabet Books','Choice Boards','AAC','Data Collect','Escalation','Visual Sched','Worksheets','Morning Mtg','Sensory','Errorless','Independence','File Folders','Token Econ','Transitions','Autism Accept'];
+new Chart(document.getElementById('chartFbLikes'), {
+  type: 'bar',
+  data: { labels: fbLabels, datasets: [{ data: [349,56,32,27,45,38,34,31,28,26,24,22,20,19,18,17,15,13,10,8], backgroundColor: '#1877F2', borderRadius: 4 }] },
+  options: barOpts()
+});
+new Chart(document.getElementById('chartFbCommentsShares'), {
+  type: 'bar',
+  data: {
+    labels: fbLabels,
+    datasets: [
+      { label: 'Comments', data: [7,2,8,12,6,4,5,9,3,4,5,3,4,2,3,2,4,3,1,2], backgroundColor: '#1877F2', borderRadius: 4 },
+      { label: 'Shares', data: [4,3,15,8,5,6,4,3,5,2,3,4,2,1,2,3,1,1,1,1], backgroundColor: '#42b883', borderRadius: 4 }
+    ]
+  },
+  options: { ...barOpts(), plugins: { legend: { display: true, position: 'top' } } }
+});
+
+// ===== TIKTOK CHARTS =====
+const ttLabels = ['Crisis Cards','Alphabet Books','Ranking SPED','Choice Boards','Escalation','Hygiene WB','Convo Skills','Spring WB','AAC','Contingency','Data Collect','Independence','Worksheets','Morning Mtg','Visual Sched','File Folders','Token Econ','Errorless','Sensory','Transitions'];
+new Chart(document.getElementById('chartTtPlays'), {
+  type: 'bar',
+  data: { labels: ttLabels, datasets: [{ data: [29800,18900,9602,5000,4800,4200,3800,3400,3100,2900,2600,2400,2100,1800,1500,1100,880,620,540,440], backgroundColor: '#000000', borderRadius: 4 }] },
+  options: barOpts()
+});
+new Chart(document.getElementById('chartTtLikesShares'), {
+  type: 'bar',
+  data: {
+    labels: ttLabels,
+    datasets: [
+      { label: 'Likes', data: [777,434,891,267,245,198,176,156,142,134,118,108,96,84,72,54,42,38,32,28], backgroundColor: '#000000', borderRadius: 4 },
+      { label: 'Shares', data: [107,66,37,22,31,28,19,24,18,21,15,19,14,12,16,10,8,12,18,16], backgroundColor: '#69C9D0', borderRadius: 4 }
+    ]
+  },
+  options: { ...barOpts(), plugins: { legend: { display: true, position: 'top' } } }
+});
+
+// ===== YOUTUBE CHARTS =====
+const ytLabels = ['Crisis/Calm','Escalation','Worksheets','Independence','Data Collect','Convo Skills','Contingency','AAC','Adapted Books','Morning Mtg','Visual Sched','Errorless','File Folders','Token Econ','Hygiene','Transitions','Choice Boards','Sensory','Spring Match','Weekly WB'];
+new Chart(document.getElementById('chartYtViews'), {
+  type: 'bar',
+  data: { labels: ytLabels, datasets: [{ data: [2354,1278,1148,775,684,620,580,542,498,465,420,398,375,350,328,310,288,265,145,123], backgroundColor: '#FF0000', borderRadius: 4 }] },
+  options: barOpts()
+});
+new Chart(document.getElementById('chartYtLikes'), {
+  type: 'bar',
+  data: { labels: ytLabels, datasets: [{ data: [69,17,38,34,28,25,22,20,19,18,16,15,14,13,12,11,10,22,8,6], backgroundColor: '#CC0000', borderRadius: 4 }] },
+  options: barOpts()
+});
+</script>
+</body>
+</html>
