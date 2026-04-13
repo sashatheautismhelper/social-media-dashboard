@@ -1,1 +1,30 @@
+name: Weekly Social Media Dashboard Update
 
+on:
+  schedule:
+    - cron: "30 13 * * 1"
+  workflow_dispatch:
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - name: Build dashboard
+        env:
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: python scripts/build_dashboard.py
+      - name: Commit changes
+        run: |
+          git config user.name "Dashboard Bot"
+          git config user.email "actions@github.com"
+          git add index.html
+          git diff --staged --quiet || git commit -m "Update dashboard"
+          git push
