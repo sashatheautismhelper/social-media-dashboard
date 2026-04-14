@@ -1,610 +1,1364 @@
+#!/usr/bin/env python3
 """
-Weekly Social Media Dashboard Builder for The Autism Helper.
+Build a social media dashboard for The Autism Helper.
  
-Pulls fresh engagement data from Apify scrapers, builds a branded HTML
-dashboard, writes it to index.html (which GitHub Pages publishes), and
-sends a Slack notification with a summary.
- 
-Designed to run inside GitHub Actions. Reads APIFY_TOKEN and
-SLACK_WEBHOOK_URL from the environment.
+This script:
+1. Calls Apify API to scrape Instagram, TikTok, YouTube, and Facebook data
+2. Aggregates metrics
+3. Generates an HTML dashboard
+4. Sends a Slack notification
 """
  
-from __future__ import annotations
- 
-import json
 import os
 import sys
+import json
 import time
-from datetime import datetime, timedelta
-from typing import Any
- 
 import requests
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional
+from html import escape as html_escape
  
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
  
-APIFY_TOKEN = os.environ.get("APIFY_TOKEN", "").strip()
-SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL", "").strip()
+# ============================================================================
+# CONFIGURATION
+# ============================================================================
  
-DASHBOARD_URL = "https://sashatheautismhelper.github.io/social-media-dashboard/"
-PRIMARY = "#148496"
-ACCENT = "#F1592E"
+APIFY_TOKEN = os.getenv("APIFY_TOKEN")
+SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")
  
-ACTORS = {
+APIFY_API_BASE = "https://api.apify.com/v2"
+ 
+PLATFORMS = {
     "instagram": {
-        "id": "shu8hvrXbJbY3Eb9W",
+        "actor_id": "shu8hvrXbJbY3Eb9W",
         "input": {
             "directUrls": ["https://www.instagram.com/theautismhelper/"],
             "resultsLimit": 30,
         },
+        "color": "#E1306C",
     },
     "tiktok": {
-        "id": "clockworks~free-tiktok-scraper",
+        "actor_id": "clockworks~free-tiktok-scraper",
         "input": {
             "profiles": ["https://www.tiktok.com/@theautismhelper"],
             "resultsPerPage": 30,
         },
+        "color": "#000000",
     },
     "youtube": {
-        "id": "KoJrdxJCTtpon81KY",
+        "actor_id": "bernardo~youtube-scraper",
         "input": {
             "startUrls": [{"url": "https://www.youtube.com/@theautismhelper"}],
             "maxResults": 20,
-            "maxResultsShorts": 0,
-            "maxResultStreams": 0,
         },
+        "color": "#FF0000",
     },
     "facebook": {
-        "id": "apify~facebook-posts-scraper",
+        "actor_id": "apify~facebook-posts-scraper",
         "input": {
             "startUrls": [{"url": "https://www.facebook.com/theautismhelper"}],
             "resultsLimit": 30,
         },
+        "color": "#1877F2",
     },
 }
  
-POLL_INTERVAL_SECONDS = 30
-MAX_WAIT_SECONDS = 15 * 60  # 15 minutes per actor
+POLL_INTERVAL = 30  # seconds
+MAX_WAIT_TIME = 15 * 60  # 15 minutes
  
-# ---------------------------------------------------------------------------
-# Apify helpers
-# ---------------------------------------------------------------------------
- 
- 
-def start_actor(actor_id: str, input_payload: dict[str, Any]) -> str:
-    """Start an Apify actor run, return the run ID."""
-    url = f"https://api.apify.com/v2/acts/{actor_id}/runs?token={APIFY_TOKEN}"
-    response = requests.post(url, json=input_payload, timeout=30)
-    response.raise_for_status()
-    return response.json()["data"]["id"]
+BRAND_PRIMARY = "#148496"
+BRAND_ACCENT = "#F1592E"
  
  
-def wait_for_run(run_id: str) -> dict[str, Any] | None:
-    """Poll until the run finishes. Return the run record or None on failure."""
-    url = f"https://api.apify.com/v2/actor-runs/{run_id}?token={APIFY_TOKEN}"
-    deadline = time.time() + MAX_WAIT_SECONDS
-    while time.time() < deadline:
-        response = requests.get(url, timeout=30)
-        response.raise_for_status()
-        run = response.json()["data"]
-        status = run["status"]
-        if status == "SUCCEEDED":
-            return run
-        if status in {"FAILED", "ABORTED", "TIMED-OUT"}:
-            print(f"  Run {run_id} ended with status {status}")
-            return None
-        time.sleep(POLL_INTERVAL_SECONDS)
-    print(f"  Run {run_id} exceeded max wait time")
-    return None
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
  
  
-def fetch_dataset(dataset_id: str) -> list[dict[str, Any]]:
-    """Fetch all items from an Apify dataset."""
-    url = (
-        f"https://api.apify.com/v2/datasets/{dataset_id}/items"
-        f"?token={APIFY_TOKEN}&format=json&limit=100"
-    )
-    response = requests.get(url, timeout=60)
-    response.raise_for_status()
-    return response.json()
+def find_value(item: Dict[str, Any], *keys: str) -> int:
+    """
+    Try multiple dot-notation keys and return the first non-zero int.
  
- 
-def scrape_platform(platform: str) -> list[dict[str, Any]]:
-    """Run a scraper end-to-end. Returns dataset items, or empty list on failure."""
-    config = ACTORS[platform]
-    print(f"Starting {platform} scraper ({config['id']})...")
-    try:
-        run_id = start_actor(config["id"], config["input"])
-        print(f"  Run started: {run_id}")
-    except requests.HTTPError as exc:
-        print(f"  Failed to start {platform}: {exc}")
-        return []
-    except Exception as exc:
-        print(f"  Unexpected error starting {platform}: {exc}")
-        return []
- 
-    run = wait_for_run(run_id)
-    if not run:
-        print(f"  {platform}: scraper did not succeed")
-        return []
- 
-    dataset_id = run.get("defaultDatasetId")
-    if not dataset_id:
-        print(f"  {platform}: no dataset returned")
-        return []
- 
-    items = fetch_dataset(dataset_id)
-    print(f"  {platform}: {len(items)} items fetched")
- 
-    # Filter out error items (like YouTube sometimes returns)
-    valid_items = [
-        item for item in items
-        if not item.get("error") and not item.get("errorDescription")
-    ]
-    if len(valid_items) < len(items):
-        print(f"  {platform}: filtered {len(items) - len(valid_items)} error items, "
-              f"{len(valid_items)} valid")
-    items = valid_items
- 
-    # Debug: print first item keys
-    if items:
-        first = items[0]
-        print(f"  {platform} sample keys: {sorted(first.keys())[:25]}")
-        # Print follower-related fields
-        for key in sorted(first.keys()):
-            kl = key.lower()
-            if "follow" in kl or "fan" in kl or "subscri" in kl:
-                print(f"    {key} = {first[key]}")
-    return items
- 
- 
-# ---------------------------------------------------------------------------
-# Metric aggregation
-# ---------------------------------------------------------------------------
- 
- 
-def safe_int(value: Any) -> int:
-    try:
-        return int(value or 0)
-    except (TypeError, ValueError):
-        return 0
- 
- 
-def find_value(item: dict, *keys: str) -> int:
-    """Try multiple possible field names, return first non-zero int found."""
+    Example:
+        find_value(item, "likesCount", "likes", "engagement.likes")
+    """
     for key in keys:
-        parts = key.split(".")
-        val = item
-        for part in parts:
-            if isinstance(val, dict):
-                val = val.get(part)
-            else:
-                val = None
-                break
-        result = safe_int(val)
-        if result:
-            return result
+        try:
+            parts = key.split(".")
+            value = item
+            for part in parts:
+                value = value[part]
+ 
+            if isinstance(value, (int, float)) and value != 0:
+                return int(value)
+        except (KeyError, TypeError, ValueError):
+            continue
+ 
     return 0
  
  
-def aggregate(platform: str, items: list[dict[str, Any]]) -> dict[str, Any]:
-    """Compute totals and pick top posts. Schema varies by platform."""
-    if not items:
-        return {
-            "platform": platform,
-            "post_count": 0,
-            "followers": 0,
-            "likes": 0,
-            "comments": 0,
-            "shares": 0,
-            "views": 0,
-            "engagement_rate": 0.0,
-            "top_posts": [],
-        }
+def filter_valid_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Filter out items with error keys."""
+    return [
+        item
+        for item in items
+        if "error" not in item and "errorDescription" not in item
+    ]
  
-    likes = comments = shares = views = followers = 0
-    scored: list[tuple[int, dict[str, Any]]] = []
  
-    for item in items:
-        if platform == "instagram":
-            l = find_value(item, "likesCount", "likes")
-            c = find_value(item, "commentsCount", "comments")
-            s = 0  # Instagram doesn't expose share counts
-            v = find_value(item, "videoViewCount", "videoPlayCount", "viewCount")
-            caption = (item.get("caption") or item.get("text") or "")[:80]
-            post_type = item.get("type", "Post")
-        elif platform == "tiktok":
-            l = find_value(item, "diggCount", "likesCount", "likes",
-                           "stats.diggCount")
-            c = find_value(item, "commentCount", "commentsCount", "comments",
-                           "stats.commentCount")
-            s = find_value(item, "shareCount", "sharesCount", "shares",
-                           "stats.shareCount")
-            v = find_value(item, "playCount", "plays", "viewCount",
-                           "stats.playCount")
-            caption = (item.get("text") or item.get("desc")
-                        or item.get("caption") or "")[:80]
-            post_type = "Video"
-        elif platform == "youtube":
-            l = find_value(item, "likes", "likesCount", "likeCount")
-            c = find_value(item, "commentsCount", "commentCount",
-                           "numberOfComments", "comments")
-            s = 0
-            v = find_value(item, "viewCount", "views", "viewsCount")
-            caption = (item.get("title") or item.get("text") or "")[:80]
-            post_type = "Video"
-        elif platform == "facebook":
-            l = find_value(item, "likes", "likesCount", "reactions",
-                           "reactionsCount", "topReactionsCount")
-            c = find_value(item, "comments", "commentsCount", "commentCount")
-            s = find_value(item, "shares", "sharesCount", "shareCount")
-            v = find_value(item, "viewCount", "views", "videoViews")
-            caption = (item.get("text") or item.get("message")
-                        or item.get("postText") or "")[:80]
-            post_type = item.get("type", "Post")
+def sanitize_to_ascii(html: str) -> str:
+    """Replace every char with ord > 127 with &#NNNNN; entity."""
+    result = []
+    for char in html:
+        if ord(char) > 127:
+            result.append(f"&#{ord(char)};")
         else:
+            result.append(char)
+    return "".join(result)
+ 
+ 
+def log(message: str):
+    """Print a timestamped log message."""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{timestamp}] {message}")
+ 
+ 
+# ============================================================================
+# APIFY API FUNCTIONS
+# ============================================================================
+ 
+ 
+def call_apify_actor(actor_id: str, input_data: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
+    """
+    Call an Apify actor and poll for results.
+    Returns the items list or None if failed.
+    """
+    headers = {"Authorization": f"Bearer {APIFY_TOKEN}"}
+ 
+    # Start the actor run
+    run_url = f"{APIFY_API_BASE}/actors/{actor_id}/runs"
+    start_response = requests.post(
+        run_url,
+        json={"input": input_data},
+        headers=headers,
+        timeout=30,
+    )
+ 
+    if start_response.status_code not in (200, 201):
+        log(f"Failed to start actor {actor_id}: {start_response.status_code}")
+        return None
+ 
+    run_data = start_response.json()
+    run_id = run_data.get("data", {}).get("id")
+ 
+    if not run_id:
+        log(f"No run ID returned for actor {actor_id}")
+        return None
+ 
+    log(f"Run started: {run_id}")
+ 
+    # Poll for completion
+    status_url = f"{APIFY_API_BASE}/actor-runs/{run_id}"
+    start_time = time.time()
+ 
+    while True:
+        elapsed = time.time() - start_time
+ 
+        if elapsed > MAX_WAIT_TIME:
+            log(f"Timeout waiting for actor {actor_id}")
+            return None
+ 
+        status_response = requests.get(status_url, headers=headers, timeout=30)
+ 
+        if status_response.status_code != 200:
+            log(f"Failed to check status for {run_id}: {status_response.status_code}")
+            return None
+ 
+        status_data = status_response.json()
+        status = status_data.get("data", {}).get("status")
+ 
+        if status == "SUCCEEDED":
+            break
+        elif status in ("FAILED", "ABORTED", "TIMED-OUT"):
+            log(f"Actor {actor_id} run {run_id} ended with status: {status}")
+            return None
+ 
+        # Still running, wait and retry
+        time.sleep(POLL_INTERVAL)
+ 
+    # Get the results
+    dataset_id = status_data.get("data", {}).get("defaultDatasetId")
+ 
+    if not dataset_id:
+        log(f"No dataset ID returned for {run_id}")
+        return None
+ 
+    items_url = f"{APIFY_API_BASE}/datasets/{dataset_id}/items"
+    items_response = requests.get(items_url, headers=headers, timeout=30)
+ 
+    if items_response.status_code != 200:
+        log(f"Failed to fetch items from {dataset_id}: {items_response.status_code}")
+        return None
+ 
+    items = items_response.json()
+    return items if isinstance(items, list) else []
+ 
+ 
+def scrape_all_platforms() -> Dict[str, List[Dict[str, Any]]]:
+    """Scrape all platforms, continuing even if some fail."""
+    results = {}
+ 
+    for platform, config in PLATFORMS.items():
+        log(f"Starting {platform} scraper... (Actor: {config['actor_id']})")
+ 
+        items = call_apify_actor(config["actor_id"], config["input"])
+ 
+        if items is None:
+            log(f"{platform}: FAILED")
+            results[platform] = []
             continue
  
-        likes += l
-        comments += c
-        shares += s
-        views += v
-        engagement_score = l + c * 3 + s * 5
-        scored.append((engagement_score, {
-            "caption": caption.strip() or "(no caption)",
-            "type": post_type,
-            "likes": l,
-            "comments": c,
-            "shares": s,
-            "views": v,
-        }))
+        # Filter valid items
+        valid_items = filter_valid_items(items)
+        log(f"{platform}: {len(valid_items)} items fetched")
  
-    scored.sort(key=lambda x: x[0], reverse=True)
-    top_posts = [post for _, post in scored[:5]]
-    total_engagement = likes + comments + shares
+        # Log sample keys
+        if valid_items:
+            sample_keys = sorted(valid_items[0].keys())[:25]
+            log(f"{platform} sample keys: {sample_keys}")
  
-    print(f"  {platform} aggregated: {len(items)} posts, "
-          f"{total_engagement:,} engagements, {views:,} views")
+        results[platform] = valid_items
+ 
+    return results
+ 
+ 
+# ============================================================================
+# DATA AGGREGATION
+# ============================================================================
+ 
+ 
+def aggregate_instagram(items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Aggregate Instagram data."""
+    posts = []
+ 
+    for item in items:
+        likes = find_value(item, "likesCount", "likes")
+        comments = find_value(item, "commentsCount", "comments")
+        views = find_value(item, "videoViewCount", "videoPlayCount")
+        caption = item.get("caption") or item.get("text") or ""
+ 
+        engagement = likes + (comments * 3) + (views * 5)
+ 
+        posts.append({
+            "url": item.get("url") or item.get("postUrl") or "",
+            "caption": caption[:100] + "..." if len(caption) > 100 else caption,
+            "likes": likes,
+            "comments": comments,
+            "shares": 0,
+            "views": views,
+            "engagement": engagement,
+            "timestamp": item.get("timestamp") or datetime.now().isoformat(),
+        })
+ 
+    # Top 5 by engagement
+    top_posts = sorted(posts, key=lambda x: x["engagement"], reverse=True)[:5]
+ 
+    total_likes = sum(p["likes"] for p in posts)
+    total_comments = sum(p["comments"] for p in posts)
+    total_shares = sum(p["shares"] for p in posts)
+    total_views = sum(p["views"] for p in posts)
+    total_engagement = total_likes + (total_comments * 3) + (total_shares * 5)
  
     return {
-        "platform": platform,
-        "post_count": len(items),
-        "followers": followers,
-        "likes": likes,
-        "comments": comments,
-        "shares": shares,
-        "views": views,
-        "engagement_rate": 0.0,
+        "platform": "Instagram",
+        "posts_analyzed": len(posts),
+        "total_likes": total_likes,
+        "total_comments": total_comments,
+        "total_shares": total_shares,
+        "total_views": total_views,
+        "total_engagement": total_engagement,
         "top_posts": top_posts,
     }
  
  
-# ---------------------------------------------------------------------------
-# HTML rendering (ASCII-safe, pure CSS charts - no JS dependency)
-# ---------------------------------------------------------------------------
+def aggregate_tiktok(items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Aggregate TikTok data."""
+    posts = []
+ 
+    for item in items:
+        likes = find_value(item, "diggCount", "likesCount", "likes")
+        comments = find_value(item, "commentCount", "commentsCount")
+        shares = find_value(item, "shareCount", "sharesCount")
+        views = find_value(item, "playCount", "plays")
+        caption = item.get("text") or item.get("desc") or ""
+ 
+        engagement = likes + (comments * 3) + (shares * 5)
+ 
+        posts.append({
+            "url": item.get("url") or item.get("videoUrl") or "",
+            "caption": caption[:100] + "..." if len(caption) > 100 else caption,
+            "likes": likes,
+            "comments": comments,
+            "shares": shares,
+            "views": views,
+            "engagement": engagement,
+            "timestamp": item.get("createTime") or item.get("timestamp") or datetime.now().isoformat(),
+        })
+ 
+    # Top 5 by engagement
+    top_posts = sorted(posts, key=lambda x: x["engagement"], reverse=True)[:5]
+ 
+    total_likes = sum(p["likes"] for p in posts)
+    total_comments = sum(p["comments"] for p in posts)
+    total_shares = sum(p["shares"] for p in posts)
+    total_views = sum(p["views"] for p in posts)
+    total_engagement = total_likes + (total_comments * 3) + (total_shares * 5)
+ 
+    return {
+        "platform": "TikTok",
+        "posts_analyzed": len(posts),
+        "total_likes": total_likes,
+        "total_comments": total_comments,
+        "total_shares": total_shares,
+        "total_views": total_views,
+        "total_engagement": total_engagement,
+        "top_posts": top_posts,
+    }
  
  
-EMOJI = {
-    "chart": "&#128202;",
-    "trend": "&#128200;",
-    "bulb": "&#128161;",
-    "target": "&#127919;",
-    "rocket": "&#128640;",
-    "trophy": "&#127942;",
-    "fire": "&#128293;",
-}
+def aggregate_facebook(items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Aggregate Facebook data."""
+    posts = []
  
-PLATFORM_COLORS = {
-    "instagram": "#E1306C",
-    "tiktok": "#000000",
-    "youtube": "#FF0000",
-    "facebook": "#1877F2",
-}
+    for item in items:
+        likes = find_value(item, "likes", "likesCount", "topReactionsCount")
+        comments = find_value(item, "comments", "commentsCount")
+        shares = find_value(item, "shares", "sharesCount")
+        caption = item.get("text") or item.get("message") or ""
+ 
+        engagement = likes + (comments * 3) + (shares * 5)
+ 
+        posts.append({
+            "url": item.get("url") or item.get("postUrl") or "",
+            "caption": caption[:100] + "..." if len(caption) > 100 else caption,
+            "likes": likes,
+            "comments": comments,
+            "shares": shares,
+            "views": 0,  # Facebook typically doesn't expose view counts via scraping
+            "engagement": engagement,
+            "timestamp": item.get("timestamp") or item.get("createdTime") or datetime.now().isoformat(),
+        })
+ 
+    # Top 5 by engagement
+    top_posts = sorted(posts, key=lambda x: x["engagement"], reverse=True)[:5]
+ 
+    total_likes = sum(p["likes"] for p in posts)
+    total_comments = sum(p["comments"] for p in posts)
+    total_shares = sum(p["shares"] for p in posts)
+    total_views = sum(p["views"] for p in posts)
+    total_engagement = total_likes + (total_comments * 3) + (total_shares * 5)
+ 
+    return {
+        "platform": "Facebook",
+        "posts_analyzed": len(posts),
+        "total_likes": total_likes,
+        "total_comments": total_comments,
+        "total_shares": total_shares,
+        "total_views": total_views,
+        "total_engagement": total_engagement,
+        "top_posts": top_posts,
+    }
  
  
-def fmt(n: int) -> str:
-    """Format a number with thousand separators."""
-    return f"{n:,}"
+def aggregate_youtube(items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Aggregate YouTube data."""
+    posts = []
+ 
+    for item in items:
+        likes = find_value(item, "likes", "likesCount", "likeCount")
+        comments = find_value(item, "commentsCount", "commentCount", "numberOfComments", "comments")
+        shares = 0
+        views = find_value(item, "viewCount", "views", "viewsCount")
+        caption = item.get("title") or item.get("text") or ""
+ 
+        engagement = likes + (comments * 3)
+ 
+        posts.append({
+            "url": item.get("url") or item.get("videoUrl") or "",
+            "caption": caption[:100] + "..." if len(caption) > 100 else caption,
+            "likes": likes,
+            "comments": comments,
+            "shares": shares,
+            "views": views,
+            "engagement": engagement,
+            "timestamp": item.get("date") or item.get("uploadDate") or datetime.now().isoformat(),
+        })
+ 
+    top_posts = sorted(posts, key=lambda x: x["engagement"], reverse=True)[:5]
+ 
+    total_likes = sum(p["likes"] for p in posts)
+    total_comments = sum(p["comments"] for p in posts)
+    total_shares = sum(p["shares"] for p in posts)
+    total_views = sum(p["views"] for p in posts)
+    total_engagement = total_likes + (total_comments * 3)
+ 
+    return {
+        "platform": "YouTube",
+        "posts_analyzed": len(posts),
+        "total_likes": total_likes,
+        "total_comments": total_comments,
+        "total_shares": total_shares,
+        "total_views": total_views,
+        "total_engagement": total_engagement,
+        "top_posts": top_posts,
+    }
  
  
-def metric_card(label: str, value: str, accent: bool = False, sub: str = "") -> str:
-    cls = "metric-card accent" if accent else "metric-card"
-    return f"""<div class="{cls}">
-            <div class="metric-label">{label}</div>
-            <div class="metric-value">{value}</div>
-            <div class="metric-change">{sub}</div>
-        </div>"""
+def aggregate_data(raw_data: Dict[str, List[Dict[str, Any]]]) -> Dict[str, Dict[str, Any]]:
+    """Aggregate all platform data."""
+    aggregated = {}
+ 
+    if raw_data.get("instagram"):
+        aggregated["instagram"] = aggregate_instagram(raw_data["instagram"])
+ 
+    if raw_data.get("tiktok"):
+        aggregated["tiktok"] = aggregate_tiktok(raw_data["tiktok"])
+ 
+    if raw_data.get("youtube"):
+        aggregated["youtube"] = aggregate_youtube(raw_data["youtube"])
+ 
+    if raw_data.get("facebook"):
+        aggregated["facebook"] = aggregate_facebook(raw_data["facebook"])
+ 
+    return aggregated
  
  
-def css_bar_chart(metrics: dict[str, dict[str, Any]]) -> str:
-    """Build a pure CSS horizontal bar chart - no JavaScript needed."""
-    bars = ""
-    max_val = max(
-        (m["likes"] + m["comments"] + m["shares"] for m in metrics.values()),
-        default=1
+# ============================================================================
+# INSIGHTS AND ACTION ITEMS
+# ============================================================================
+ 
+ 
+def generate_insights(aggregated: Dict[str, Dict[str, Any]]) -> Dict[str, str]:
+    """Generate insight cards based on data."""
+    insights = {}
+ 
+    # Find platforms by engagement
+    engagement_by_platform = {
+        k: v["total_engagement"] for k, v in aggregated.items()
+    }
+ 
+    if not engagement_by_platform:
+        insights["whats_working"] = "Collect data from platforms to see what's working."
+        insights["opportunities"] = "Analyze your content strategy across platforms."
+        insights["watch_list"] = "Monitor your top-performing posts."
+        return insights
+ 
+    # What's Working
+    top_platform = max(engagement_by_platform, key=engagement_by_platform.get)
+    top_platform_data = aggregated[top_platform]
+    top_post = (
+        top_platform_data["top_posts"][0]
+        if top_platform_data["top_posts"]
+        else {"caption": "content"}
     )
-    if max_val == 0:
-        max_val = 1
+    platform_display = top_platform.capitalize()
+    insights[
+        "whats_working"
+    ] = f"{platform_display} is driving the highest engagement with {top_platform_data['total_engagement']} total interactions. Your audience is particularly responsive to this platform. Keep leveraging '{top_post['caption']}' style content."
  
-    for name, data in metrics.items():
-        eng = data["likes"] + data["comments"] + data["shares"]
-        pct = (eng / max_val) * 100
-        color = PLATFORM_COLORS.get(name, PRIMARY)
-        bars += f"""<div class="bar-row">
-                <div class="bar-label">{name.title()}</div>
-                <div class="bar-track">
-                    <div class="bar-fill" style="width:{pct:.1f}%;background:{color}"></div>
-                </div>
-                <div class="bar-value">{fmt(eng)}</div>
-            </div>
-"""
-    return f"""<div class="chart-section">
-            <h3>{EMOJI["chart"]} Engagement by Platform</h3>
-            {bars}
-        </div>"""
+    # Opportunities
+    bottom_platform = min(engagement_by_platform, key=engagement_by_platform.get)
+    bottom_platform_data = aggregated[bottom_platform]
+    platform_display = bottom_platform.capitalize()
+    insights[
+        "opportunities"
+    ] = f"{platform_display} has room for growth with {bottom_platform_data['total_engagement']} interactions. Consider experimenting with different content formats or posting schedules to increase engagement on this platform."
  
+    # Watch List
+    all_posts = []
+    for platform_data in aggregated.values():
+        all_posts.extend(platform_data["top_posts"])
  
-def platform_section(name: str, data: dict[str, Any]) -> str:
-    rows = ""
-    for post in data["top_posts"]:
-        rows += f"""<tr>
-                            <td>{post['caption']}</td>
-                            <td>{post['type']}</td>
-                            <td>{fmt(post['likes'])}</td>
-                            <td>{fmt(post['comments'])}</td>
-                            <td>{fmt(post['shares'])}</td>
-                            <td>{fmt(post['views'])}</td>
-                        </tr>
-"""
-    if not rows:
-        rows = '<tr><td colspan="6" style="text-align:center;color:#999;padding:2rem">No data available this run</td></tr>'
+    if all_posts:
+        watch_post = max(all_posts, key=lambda x: x["engagement"])
+        total_reach = sum(
+            p["total_engagement"] for p in aggregated.values()
+        )
+        insights[
+            "watch_list"
+        ] = f"Your top-performing post '{watch_post['caption']}' generated {watch_post['engagement']} interactions. Total reach across all platforms: {total_reach} engagements. This represents strong community connection."
+    else:
+        insights[
+            "watch_list"
+        ] = "Monitor your top-performing posts across all platforms to identify content patterns."
  
-    note = ""
-    if data["post_count"] == 0:
-        note = ('<div style="color:#F1592E;padding:1rem;background:#fff3f0;'
-                'border-radius:8px;margin-bottom:1rem">'
-                'Scraper returned no data for this platform this week.</div>')
- 
-    eng = data["likes"] + data["comments"] + data["shares"]
-    color = PLATFORM_COLORS.get(name, PRIMARY)
- 
-    return f"""<div id="{name}" class="tab-content">
-            {note}
-            <div class="metrics-grid">
-                {metric_card("Total Likes", fmt(data["likes"]), sub="This week")}
-                {metric_card("Total Comments", fmt(data["comments"]), accent=True, sub="This week")}
-                {metric_card("Total Shares", fmt(data["shares"]), sub="This week")}
-                {metric_card("Total Views", fmt(data["views"]) if data["views"] else "&mdash;", accent=True, sub="This week")}
-            </div>
-            <div class="summary-bar" style="border-left-color:{color}">
-                <strong>{data["post_count"]}</strong> posts analyzed &middot;
-                <strong>{fmt(eng)}</strong> total engagements
-            </div>
-            <div class="top-posts-table">
-                <h3>{EMOJI["trophy"]} Top Performing Posts</h3>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Content</th><th>Type</th><th>Likes</th>
-                            <th>Comments</th><th>Shares</th><th>Views</th>
-                        </tr>
-                    </thead>
-                    <tbody>{rows}</tbody>
-                </table>
-            </div>
-        </div>"""
+    return insights
  
  
-def build_html(metrics: dict[str, dict[str, Any]], date_range: str) -> str:
-    overview_total_engagement = sum(
-        m["likes"] + m["comments"] + m["shares"] for m in metrics.values()
-    )
-    overview_total_views = sum(m["views"] for m in metrics.values())
-    overview_total_posts = sum(m["post_count"] for m in metrics.values())
-    platforms_ok = sum(1 for m in metrics.values() if m["post_count"] > 0)
+def generate_action_items(platform: str) -> List[str]:
+    """Generate contextual action items for each platform."""
+    if platform.lower() == "instagram":
+        return [
+            "Create more Reels with educational autism strategies and sensory tips",
+            "Develop carousel posts for classroom teachers with step-by-step implementation guides",
+            "Collaborate with special education professionals for partnership content",
+            "Post behind-the-scenes content showing curriculum development process",
+        ]
+    elif platform.lower() == "tiktok":
+        return [
+            "Produce short-form educational videos using trending sounds and hashtags",
+            "Create autism awareness content and myth-busting videos",
+            "Participate in duets with special education creators to expand reach",
+            "Share quick sensory activity ideas in under 60 seconds",
+        ]
+    elif platform.lower() == "youtube":
+        return [
+            "Create longer-form video tutorials on autism strategies and classroom setups",
+            "Add YouTube Shorts to capture TikTok-style quick tips for teachers",
+            "Optimize video titles and thumbnails for search discoverability",
+            "Build playlists by topic (sensory, communication, behavior) to increase watch time",
+        ]
+    elif platform.lower() == "facebook":
+        return [
+            "Host live Q&A sessions answering parent and teacher questions",
+            "Encourage discussion in comments to build community engagement",
+            "Share longer-form educational articles and case studies",
+            "Create a Facebook Group for community discussion and resource sharing",
+        ]
  
-    bar_chart = css_bar_chart(metrics)
+    return ["Continue monitoring and optimizing content performance"]
  
-    platform_tabs = "".join(
-        platform_section(name, data) for name, data in metrics.items()
-    )
  
+# ============================================================================
+# HTML GENERATION
+# ============================================================================
+ 
+ 
+def generate_html(aggregated: Dict[str, Dict[str, Any]]) -> str:
+    """Generate the complete HTML dashboard."""
+ 
+    # Generate insights
+    insights = generate_insights(aggregated)
+ 
+    # Calculate overview metrics
+    total_posts = sum(p["posts_analyzed"] for p in aggregated.values())
+    total_engagements = sum(p["total_engagement"] for p in aggregated.values())
+    total_views = sum(p["total_views"] for p in aggregated.values())
+    platforms_reporting = len([p for p in aggregated.values() if p["posts_analyzed"] > 0])
+ 
+    # Date range
+    today = datetime.now()
+    week_ago = today - timedelta(days=7)
+    date_range = f"{week_ago.strftime('%b %d')} - {today.strftime('%b %d, %Y')}"
+ 
+    # Build platform engagement data for overview chart
+    platform_colors = {
+        "instagram": "#E1306C",
+        "tiktok": "#000000",
+        "youtube": "#FF0000",
+        "facebook": "#1877F2",
+    }
+ 
+    engagement_by_platform = {
+        k: v["total_engagement"] for k, v in aggregated.items() if v["total_engagement"] > 0
+    }
+ 
+    max_engagement = max(engagement_by_platform.values()) if engagement_by_platform else 1
+ 
+    # HTML Structure
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>The Autism Helper &mdash; Weekly Social Media Dashboard</title>
+    <title>The Autism Helper - Social Media Dashboard</title>
     <style>
-        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background: #f0f2f5; color: #333; line-height: 1.6; }}
-        header {{ background: linear-gradient(135deg, {PRIMARY} 0%, #0f5a6a 100%); color: white; padding: 2.5rem 2rem; text-align: center; }}
-        header h1 {{ font-size: 2.2rem; margin-bottom: 0.3rem; }}
-        header p {{ font-size: 1rem; opacity: 0.85; }}
-        .container {{ max-width: 1200px; margin: 1.5rem auto; padding: 0 1rem; }}
-        .tabs {{ display: flex; gap: 0.25rem; margin-bottom: 1.5rem; flex-wrap: wrap; }}
-        .tab-button {{ padding: 0.75rem 1.25rem; background: white; border: 2px solid #e0e0e0; border-radius: 8px 8px 0 0; cursor: pointer; font-size: 0.95rem; font-weight: 500; color: #666; }}
-        .tab-button:hover {{ color: {PRIMARY}; border-color: {PRIMARY}; }}
-        .tab-button.active {{ color: white; background: {PRIMARY}; border-color: {PRIMARY}; }}
-        .tab-content {{ display: none; }}
-        .tab-content.active {{ display: block; }}
-        .metrics-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }}
-        .metric-card {{ background: white; padding: 1.25rem; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); border-left: 4px solid {PRIMARY}; }}
-        .metric-card.accent {{ border-left-color: {ACCENT}; }}
-        .metric-label {{ font-size: 0.8rem; color: #999; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.3rem; }}
-        .metric-value {{ font-size: 1.8rem; font-weight: 700; color: {PRIMARY}; }}
-        .metric-card.accent .metric-value {{ color: {ACCENT}; }}
-        .metric-change {{ font-size: 0.8rem; color: #aaa; margin-top: 0.25rem; }}
-        .chart-section {{ background: white; padding: 1.5rem; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); margin-bottom: 1.5rem; }}
-        .chart-section h3 {{ margin-bottom: 1.25rem; color: {PRIMARY}; font-size: 1.1rem; }}
-        .bar-row {{ display: flex; align-items: center; margin-bottom: 0.75rem; gap: 0.75rem; }}
-        .bar-label {{ width: 90px; font-weight: 600; font-size: 0.9rem; text-align: right; color: #555; }}
-        .bar-track {{ flex: 1; height: 32px; background: #f0f0f0; border-radius: 6px; overflow: hidden; }}
-        .bar-fill {{ height: 100%; border-radius: 6px; transition: width 0.5s ease; min-width: 2px; }}
-        .bar-value {{ width: 80px; font-weight: 600; font-size: 0.9rem; color: #333; }}
-        .summary-bar {{ background: white; padding: 1rem 1.25rem; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); margin-bottom: 1.5rem; border-left: 4px solid {PRIMARY}; font-size: 0.95rem; color: #555; }}
-        .top-posts-table {{ background: white; padding: 1.5rem; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); margin-bottom: 1.5rem; overflow-x: auto; }}
-        .top-posts-table h3 {{ margin-bottom: 1rem; color: {PRIMARY}; font-size: 1.1rem; }}
-        table {{ width: 100%; border-collapse: collapse; }}
-        th {{ background: #f8f9fa; padding: 0.6rem 0.75rem; text-align: left; border-bottom: 2px solid #e0e0e0; font-weight: 600; font-size: 0.85rem; color: #555; }}
-        td {{ padding: 0.6rem 0.75rem; border-bottom: 1px solid #eee; font-size: 0.9rem; }}
-        tr:hover {{ background: #f8f9fa; }}
-        footer {{ text-align: center; padding: 1.5rem; color: #bbb; font-size: 0.8rem; }}
+        * {{
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }}
+ 
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background-color: #f8f9fa;
+            color: #333;
+        }}
+ 
+        header {{
+            background: linear-gradient(135deg, #148496 0%, #0f5a6a 100%);
+            color: white;
+            padding: 2rem;
+            text-align: center;
+        }}
+ 
+        header h1 {{
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+        }}
+ 
+        header p {{
+            font-size: 1.1rem;
+            opacity: 0.95;
+        }}
+ 
+        .container {{
+            max-width: 1200px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+        }}
+ 
+        /* TABS */
+        .tabs {{
+            display: flex;
+            gap: 0;
+            margin-bottom: 2rem;
+            border-bottom: 2px solid #e0e0e0;
+            background: white;
+            border-radius: 8px 8px 0 0;
+        }}
+ 
+        .tab-button {{
+            padding: 1rem 1.5rem;
+            border: none;
+            background: white;
+            color: #666;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: all 0.3s ease;
+            border-bottom: 3px solid transparent;
+        }}
+ 
+        .tab-button.active {{
+            color: white;
+            background: #148496;
+            border-bottom-color: #F1592E;
+        }}
+ 
+        .tab-button:hover {{
+            background: #f5f5f5;
+        }}
+ 
+        .tab-button.active:hover {{
+            background: #148496;
+        }}
+ 
+        .tab-content {{
+            display: none;
+            animation: fadeIn 0.3s ease;
+        }}
+ 
+        .tab-content.active {{
+            display: block;
+        }}
+ 
+        @keyframes fadeIn {{
+            from {{ opacity: 0; }}
+            to {{ opacity: 1; }}
+        }}
+ 
+        /* METRIC CARDS */
+        .metrics-row {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }}
+ 
+        .metric-card {{
+            background: white;
+            padding: 1.5rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+            border-left: 4px solid #148496;
+        }}
+ 
+        .metric-card.accent {{
+            border-left-color: #F1592E;
+        }}
+ 
+        .metric-label {{
+            font-size: 0.9rem;
+            color: #666;
+            margin-bottom: 0.5rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }}
+ 
+        .metric-value {{
+            font-size: 2rem;
+            font-weight: bold;
+            color: #148496;
+        }}
+ 
+        .metric-card.accent .metric-value {{
+            color: #F1592E;
+        }}
+ 
+        /* INSIGHTS */
+        .insights-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }}
+ 
+        .insight-card {{
+            background: white;
+            padding: 1.5rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        }}
+ 
+        .insight-card h4 {{
+            color: #148496;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 1.1rem;
+        }}
+ 
+        .insight-card p {{
+            color: #666;
+            font-size: 0.95rem;
+            line-height: 1.6;
+        }}
+ 
+        /* CHARTS */
+        .chart-container {{
+            background: white;
+            padding: 1.5rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+            margin-bottom: 2rem;
+        }}
+ 
+        .chart-container h3 {{
+            margin-bottom: 1.5rem;
+            color: #148496;
+            font-size: 1.2rem;
+        }}
+ 
+        /* BAR CHART */
+        .bar-chart {{
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }}
+ 
+        .bar-item {{
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }}
+ 
+        .bar-label {{
+            width: 100px;
+            font-weight: 600;
+            color: #333;
+            text-align: right;
+        }}
+ 
+        .bar-background {{
+            flex: 1;
+            background: #f0f0f0;
+            border-radius: 4px;
+            height: 30px;
+            position: relative;
+            overflow: hidden;
+        }}
+ 
+        .bar-fill {{
+            height: 100%;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            padding-right: 0.75rem;
+            color: white;
+            font-weight: 600;
+            font-size: 0.9rem;
+            justify-content: flex-end;
+        }}
+ 
+        .bar-value {{
+            width: 60px;
+            text-align: right;
+            color: #333;
+            font-weight: 600;
+        }}
+ 
+        /* DOUGHNUT CHART */
+        .doughnut-container {{
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 2rem 0;
+        }}
+ 
+        .doughnut-chart {{
+            width: 200px;
+            height: 200px;
+            border-radius: 50%;
+            position: relative;
+        }}
+ 
+        .doughnut-chart::after {{
+            content: '';
+            width: 120px;
+            height: 120px;
+            background: white;
+            border-radius: 50%;
+            position: absolute;
+            top: 40px;
+            left: 40px;
+        }}
+ 
+        .doughnut-legend {{
+            display: flex;
+            justify-content: center;
+            gap: 1.5rem;
+            margin-top: 1rem;
+            flex-wrap: wrap;
+        }}
+ 
+        .legend-item {{
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.85rem;
+            color: #666;
+        }}
+ 
+        .legend-dot {{
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }}
+ 
+        /* ACTION ITEMS */
+        .action-items {{
+            background: linear-gradient(135deg, #148496 0%, #0f5a6a 100%);
+            color: white;
+            padding: 1.5rem;
+            border-radius: 8px;
+            margin-bottom: 2rem;
+        }}
+ 
+        .action-items h3 {{
+            margin-bottom: 1rem;
+            font-size: 1.2rem;
+        }}
+ 
+        .action-items ul {{
+            list-style: none;
+        }}
+ 
+        .action-items li {{
+            margin-bottom: 0.75rem;
+            padding-left: 1.5rem;
+            position: relative;
+        }}
+ 
+        .action-items li:before {{
+            content: '&#9654;';
+            color: #F1592E;
+            position: absolute;
+            left: 0;
+        }}
+ 
+        /* TOP POSTS TABLE */
+        .top-posts-table {{
+            background: white;
+            padding: 1.5rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+            margin-bottom: 2rem;
+            overflow-x: auto;
+        }}
+ 
+        .top-posts-table h3 {{
+            margin-bottom: 1rem;
+            color: #148496;
+        }}
+ 
+        table {{
+            width: 100%;
+            border-collapse: collapse;
+        }}
+ 
+        table th {{
+            background: #f5f5f5;
+            padding: 0.75rem;
+            border-bottom: 2px solid #e0e0e0;
+            text-align: left;
+            font-weight: 600;
+            color: #333;
+            font-size: 0.9rem;
+        }}
+ 
+        table td {{
+            padding: 0.75rem;
+            border-bottom: 1px solid #e0e0e0;
+            color: #666;
+            font-size: 0.9rem;
+        }}
+ 
+        table tr:hover {{
+            background: #f9f9f9;
+        }}
+ 
+        .no-data {{
+            text-align: center;
+            padding: 2rem;
+            color: #999;
+        }}
+ 
+        footer {{
+            text-align: center;
+            padding: 2rem;
+            color: #999;
+            font-size: 0.9rem;
+        }}
+ 
+        @media (max-width: 768px) {{
+            header h1 {{
+                font-size: 1.8rem;
+            }}
+ 
+            .metrics-row {{
+                grid-template-columns: 1fr;
+            }}
+ 
+            .insights-grid {{
+                grid-template-columns: 1fr;
+            }}
+ 
+            .tabs {{
+                flex-wrap: wrap;
+            }}
+ 
+            .tab-button {{
+                flex: 1;
+                min-width: 100px;
+            }}
+        }}
     </style>
 </head>
 <body>
     <header>
         <h1>The Autism Helper</h1>
-        <p>Weekly Social Media Dashboard &mdash; {date_range}</p>
+        <p>Weekly Social Media Dashboard &#8212; {html_escape(date_range)}</p>
     </header>
+ 
     <div class="container">
+        <!-- TABS -->
         <div class="tabs">
-            <button class="tab-button active" onclick="switchTab(event,'overview')">{EMOJI["trend"]} Overview</button>
-            <button class="tab-button" onclick="switchTab(event,'instagram')">Instagram</button>
-            <button class="tab-button" onclick="switchTab(event,'tiktok')">TikTok</button>
-            <button class="tab-button" onclick="switchTab(event,'youtube')">YouTube</button>
-            <button class="tab-button" onclick="switchTab(event,'facebook')">Facebook</button>
+            <button class="tab-button active" data-tab="overview">Overview</button>
+            <button class="tab-button" data-tab="instagram">Instagram</button>
+            <button class="tab-button" data-tab="tiktok">TikTok</button>
+            <button class="tab-button" data-tab="youtube">YouTube</button>
+            <button class="tab-button" data-tab="facebook">Facebook</button>
         </div>
+ 
+        <!-- OVERVIEW TAB -->
         <div id="overview" class="tab-content active">
-            <div class="metrics-grid">
-                {metric_card("Total Engagements", fmt(overview_total_engagement), accent=True, sub="Likes + Comments + Shares")}
-                {metric_card("Posts Analyzed", str(overview_total_posts), sub="Across all platforms")}
-                {metric_card("Total Views", fmt(overview_total_views) if overview_total_views else "&mdash;", sub="Video views")}
-                {metric_card("Platforms Reporting", str(platforms_ok) + " of " + str(len(metrics)), accent=True, sub="With data this week")}
+            <!-- Metric Cards -->
+            <div class="metrics-row">
+                <div class="metric-card accent">
+                    <div class="metric-label">Total Engagements</div>
+                    <div class="metric-value">{total_engagements:,}</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Posts Analyzed</div>
+                    <div class="metric-value">{total_posts}</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Total Views</div>
+                    <div class="metric-value">{total_views:,}</div>
+                </div>
+                <div class="metric-card accent">
+                    <div class="metric-label">Platforms Reporting</div>
+                    <div class="metric-value">{platforms_reporting}</div>
+                </div>
             </div>
-            {bar_chart}
+ 
+            <!-- Engagement by Platform Chart -->
+            <div class="chart-container">
+                <h3>Engagement by Platform</h3>
+                <div class="bar-chart">
+"""
+ 
+    # Add bars for each platform with engagement
+    for platform, engagement in sorted(engagement_by_platform.items(), key=lambda x: x[1], reverse=True):
+        bar_width = (engagement / max_engagement * 100) if max_engagement > 0 else 0
+        color = platform_colors.get(platform, "#148496")
+        platform_name = platform.capitalize()
+        html += f"""                    <div class="bar-item">
+                        <div class="bar-label">{platform_name}</div>
+                        <div class="bar-background">
+                            <div class="bar-fill" style="width: {bar_width}%; background-color: {color};">
+                            </div>
+                        </div>
+                        <div class="bar-value">{engagement:,}</div>
+                    </div>
+"""
+ 
+    html += """                </div>
+            </div>
+ 
+            <!-- Insights -->
+            <div class="insights-grid">
+                <div class="insight-card">
+                    <h4>&#128161; What's Working</h4>
+                    <p>"""
+ 
+    html += html_escape(insights.get("whats_working", ""))
+    html += """</p>
+                </div>
+                <div class="insight-card">
+                    <h4>&#127919; Opportunities</h4>
+                    <p>"""
+ 
+    html += html_escape(insights.get("opportunities", ""))
+    html += """</p>
+                </div>
+                <div class="insight-card">
+                    <h4>&#128260; Watch List</h4>
+                    <p>"""
+ 
+    html += html_escape(insights.get("watch_list", ""))
+    html += """</p>
+                </div>
+            </div>
         </div>
-        {platform_tabs}
-    </div>
+ 
+"""
+ 
+    # PLATFORM TABS
+    for platform_key, platform_data in aggregated.items():
+        platform_name = platform_data["platform"]
+        tab_id = platform_key
+ 
+        # Calculate likes/comments/shares distribution
+        total_interactions = (
+            platform_data["total_likes"]
+            + platform_data["total_comments"]
+            + platform_data["total_shares"]
+        )
+ 
+        if total_interactions > 0:
+            likes_pct = (platform_data["total_likes"] / total_interactions) * 100
+            comments_pct = (platform_data["total_comments"] / total_interactions) * 100
+            shares_pct = (platform_data["total_shares"] / total_interactions) * 100
+        else:
+            likes_pct = comments_pct = shares_pct = 0
+ 
+        # Determine doughnut colors
+        likes_color = "#148496"
+        comments_color = "#F1592E"
+        shares_color = "#66BB6A"
+ 
+        # Conic gradient for doughnut
+        conic_gradient = f"conic-gradient({likes_color} 0% {likes_pct}%, {comments_color} {likes_pct}% {likes_pct + comments_pct}%, {shares_color} {likes_pct + comments_pct}% 100%)"
+ 
+        html += f"""        <!-- {platform_name.upper()} TAB -->
+        <div id="{tab_id}" class="tab-content">
+            <!-- Metric Cards -->
+            <div class="metrics-row">
+                <div class="metric-card">
+                    <div class="metric-label">Total Likes</div>
+                    <div class="metric-value">{platform_data['total_likes']:,}</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Total Comments</div>
+                    <div class="metric-value">{platform_data['total_comments']:,}</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Total Shares/Views</div>
+                    <div class="metric-value">{max(platform_data['total_shares'], platform_data['total_views']):,}</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Posts Analyzed</div>
+                    <div class="metric-value">{platform_data['posts_analyzed']}</div>
+                </div>
+            </div>
+ 
+            <!-- Doughnut Chart -->
+            <div class="chart-container">
+                <h3>Engagement Distribution</h3>
+                <div class="doughnut-container">
+                    <div class="doughnut-chart" style="background: {conic_gradient};"></div>
+                    <div class="doughnut-legend">
+                        <div class="legend-item">
+                            <div class="legend-dot" style="background: {likes_color};"></div>
+                            <span>Likes ({likes_pct:.0f}%)</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-dot" style="background: {comments_color};"></div>
+                            <span>Comments ({comments_pct:.0f}%)</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-dot" style="background: {shares_color};"></div>
+                            <span>Shares ({shares_pct:.0f}%)</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+ 
+            <!-- Top Posts Table -->
+            <div class="top-posts-table">
+                <h3>Top Performing Posts</h3>
+"""
+ 
+        if platform_data["top_posts"]:
+            html += """                <table>
+                    <thead>
+                        <tr>
+                            <th>Content</th>
+                            <th>Likes</th>
+                            <th>Comments</th>
+                            <th>Shares</th>
+                            <th>Views</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+"""
+ 
+            for post in platform_data["top_posts"]:
+                caption = html_escape(post["caption"])
+                html += f"""                        <tr>
+                            <td>{caption}</td>
+                            <td>{post['likes']:,}</td>
+                            <td>{post['comments']:,}</td>
+                            <td>{post['shares']:,}</td>
+                            <td>{post['views']:,}</td>
+                        </tr>
+"""
+ 
+            html += """                    </tbody>
+                </table>
+"""
+        else:
+            html += """                <div class="no-data">No posts data available</div>
+"""
+ 
+        html += """            </div>
+ 
+            <!-- Action Items -->
+            <div class="action-items">
+                <h3>Action Items</h3>
+                <ul>
+"""
+ 
+        action_items = generate_action_items(platform_name)
+        for item in action_items:
+            html += f"""                    <li>{html_escape(item)}</li>
+"""
+ 
+        html += """                </ul>
+            </div>
+        </div>
+ 
+"""
+ 
+    # Footer
+    html += """    </div>
+ 
     <footer>
-        Dashboard updated {datetime.utcnow().strftime("%B %d, %Y at %H:%M UTC")} &middot; Data pulled from Apify scrapers
+        <p>Generated on """
+ 
+    html += datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    html += """ UTC</p>
     </footer>
+ 
     <script>
-        function switchTab(e,n){{document.querySelectorAll('.tab-content').forEach(function(t){{t.classList.remove('active')}});document.querySelectorAll('.tab-button').forEach(function(t){{t.classList.remove('active')}});document.getElementById(n).classList.add('active');e.currentTarget.classList.add('active')}}
+        // Tab switching
+        document.querySelectorAll('.tab-button').forEach(button => {
+            button.addEventListener('click', function() {
+                // Remove active class from all buttons and content
+                document.querySelectorAll('.tab-button').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+ 
+                // Add active class to clicked button and corresponding content
+                this.classList.add('active');
+                const tabId = this.getAttribute('data-tab');
+                document.getElementById(tabId).classList.add('active');
+            });
+        });
     </script>
 </body>
-</html>"""
+</html>
+"""
  
     return html
  
  
-def sanitize_to_ascii(html: str) -> str:
-    """Replace any non-ASCII char with its numeric HTML entity."""
-    out = []
-    for ch in html:
-        code = ord(ch)
-        if code < 128:
-            out.append(ch)
-        else:
-            out.append(f"&#{code};")
-    return "".join(out)
+# ============================================================================
+# SLACK NOTIFICATION
+# ============================================================================
  
  
-# ---------------------------------------------------------------------------
-# Slack notification
-# ---------------------------------------------------------------------------
+def send_slack_notification(aggregated: Dict[str, Dict[str, Any]]):
+    """Send a Slack webhook notification with summary."""
  
- 
-def send_slack(metrics: dict[str, dict[str, Any]], date_range: str) -> None:
     if not SLACK_WEBHOOK_URL:
-        print("No SLACK_WEBHOOK_URL set; skipping Slack notification")
+        log("SLACK_WEBHOOK_URL not set, skipping notification")
         return
  
-    total_eng = sum(
-        m["likes"] + m["comments"] + m["shares"] for m in metrics.values()
-    )
-    total_posts = sum(m["post_count"] for m in metrics.values())
-    platforms_ok = sum(1 for m in metrics.values() if m["post_count"] > 0)
+    # Calculate summary stats
+    total_posts = sum(p["posts_analyzed"] for p in aggregated.values())
+    total_engagements = sum(p["total_engagement"] for p in aggregated.values())
  
-    # Find top platform
-    top_platform = max(
-        metrics.items(),
-        key=lambda kv: kv[1]["likes"] + kv[1]["comments"] + kv[1]["shares"],
-    )
-    top_name = top_platform[0].title()
-    top_eng = (top_platform[1]["likes"] + top_platform[1]["comments"]
-               + top_platform[1]["shares"])
+    # Find platform with highest engagement
+    engagement_by_platform = {
+        k: v["total_engagement"] for k, v in aggregated.items()
+    }
  
-    # Find top post across all platforms
-    top_post_caption = ""
-    top_post_score = 0
-    for m in metrics.values():
-        for post in m["top_posts"]:
-            score = post["likes"] + post["comments"] + post["shares"]
-            if score > top_post_score:
-                top_post_score = score
-                top_post_caption = post["caption"]
+    if engagement_by_platform:
+        top_platform = max(engagement_by_platform, key=engagement_by_platform.get)
+        top_platform_display = top_platform.capitalize()
+    else:
+        top_platform_display = "Unknown"
  
-    text = (
-        f":bar_chart: *Weekly Social Media Dashboard - {date_range}*\n\n"
-        f"Here are this week's highlights:\n"
-        f"- {top_name} led the week with {top_eng:,} total engagements\n"
-        f"- {total_posts} posts analyzed across {platforms_ok} platforms\n"
-    )
-    if top_post_caption:
-        text += f"- Top post: \"{top_post_caption[:60]}...\"\n"
-    text += (
-        f"\n:chart_with_upwards_trend: View the full dashboard: "
-        f"{DASHBOARD_URL}\n\n"
-        f"The dashboard includes per-platform breakdowns with top posts, "
-        f"engagement metrics, and more."
-    )
+    # Date range
+    today = datetime.now()
+    week_ago = today - timedelta(days=7)
+    date_range = f"{week_ago.strftime('%b %d')} - {today.strftime('%b %d, %Y')}"
+ 
+    # Build message
+    message = {
+        "text": "The Autism Helper - Weekly Social Media Dashboard",
+        "blocks": [
+            {
+                "type": "header",
+                "text": {
+                    "type": "plain_text",
+                    "text": "The Autism Helper - Weekly Social Media Dashboard",
+                    "emoji": True,
+                },
+            },
+            {
+                "type": "section",
+                "fields": [
+                    {
+                        "type": "mrkdwn",
+                        "text": f"*Date Range*\n{date_range}",
+                    },
+                    {
+                        "type": "mrkdwn",
+                        "text": f"*Top Platform*\n{top_platform_display}",
+                    },
+                    {
+                        "type": "mrkdwn",
+                        "text": f"*Posts Analyzed*\n{total_posts}",
+                    },
+                    {
+                        "type": "mrkdwn",
+                        "text": f"*Total Engagements*\n{total_engagements:,}",
+                    },
+                ],
+            },
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {
+                            "type": "plain_text",
+                            "text": "View Dashboard",
+                            "emoji": True,
+                        },
+                        "url": "https://sashatheautismhelper.github.io/social-media-dashboard/",
+                    },
+                ],
+            },
+        ],
+    }
  
     try:
-        resp = requests.post(SLACK_WEBHOOK_URL, json={"text": text}, timeout=15)
-        if resp.status_code == 200:
-            print("Slack notification sent")
+        response = requests.post(
+            SLACK_WEBHOOK_URL,
+            json=message,
+            timeout=30,
+        )
+ 
+        if response.status_code == 200:
+            log("Slack notification sent successfully")
         else:
-            print(f"Slack returned status {resp.status_code}: {resp.text}")
-    except requests.RequestException as exc:
-        print(f"Slack notification failed: {exc}")
+            log(f"Failed to send Slack notification: {response.status_code}")
+    except Exception as e:
+        log(f"Error sending Slack notification: {e}")
  
  
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
+# ============================================================================
+# MAIN
+# ============================================================================
  
  
-def main() -> int:
+def main():
+    """Main function."""
+ 
     if not APIFY_TOKEN:
-        print("ERROR: APIFY_TOKEN environment variable is required")
-        return 1
+        log("ERROR: APIFY_TOKEN environment variable not set")
+        sys.exit(1)
  
-    print(f"Starting dashboard build at {datetime.utcnow().isoformat()}")
+    log("=" * 80)
+    log("Starting Social Media Dashboard Build")
+    log("=" * 80)
  
-    today = datetime.utcnow().date()
-    week_start = today - timedelta(days=6)
-    date_range = f"{week_start.strftime('%B %d')} - {today.strftime('%B %d, %Y')}"
+    # Scrape all platforms
+    raw_data = scrape_all_platforms()
  
-    metrics: dict[str, dict[str, Any]] = {}
-    for platform in ACTORS:
-        items = scrape_platform(platform)
-        metrics[platform] = aggregate(platform, items)
+    # Aggregate data
+    aggregated = aggregate_data(raw_data)
  
-    print("\n--- Summary ---")
-    for p, m in metrics.items():
-        eng = m["likes"] + m["comments"] + m["shares"]
-        print(f"  {p}: {m['post_count']} posts, {eng:,} engagements, "
-              f"{m['views']:,} views")
+    # Print summary table
+    log("")
+    log("SUMMARY")
+    log("-" * 80)
+    log(f"{'Platform':<15} {'Posts':<10} {'Engagements':<15} {'Views':<15}")
+    log("-" * 80)
  
-    html = build_html(metrics, date_range)
+    for platform, data in aggregated.items():
+        log(
+            f"{platform.capitalize():<15} {data['posts_analyzed']:<10} "
+            f"{data['total_engagement']:<15} {data['total_views']:<15}"
+        )
+ 
+    log("-" * 80)
+    log("")
+ 
+    # Generate HTML
+    html = generate_html(aggregated)
+ 
+    # Sanitize to ASCII
     html = sanitize_to_ascii(html)
  
-    # Verify zero non-ASCII bytes
-    non_ascii = sum(1 for ch in html if ord(ch) > 127)
+    # Verify no non-ASCII characters remain
+    non_ascii = [ord(c) for c in html if ord(c) > 127]
     if non_ascii:
-        print(f"ERROR: {non_ascii} non-ASCII chars remain")
-        return 1
+        log(f"WARNING: Found {len(non_ascii)} non-ASCII characters")
+    else:
+        log("ASCII sanitization: VERIFIED (zero non-ASCII characters)")
  
-    with open("index.html", "w", encoding="ascii") as fh:
-        fh.write(html)
-    print(f"\nWrote index.html ({len(html):,} bytes, ASCII-clean)")
+    # Write HTML file
+    output_path = "index.html"
  
-    send_slack(metrics, date_range)
-    return 0
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(html)
+ 
+    file_size = len(html)
+    log(f"Wrote index.html ({file_size} bytes, ASCII-clean)")
+ 
+    # Send Slack notification
+    send_slack_notification(aggregated)
+ 
+    log("=" * 80)
+    log("Dashboard build complete!")
+    log("=" * 80)
  
  
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
  
