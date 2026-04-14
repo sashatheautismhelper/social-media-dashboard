@@ -16,8 +16,9 @@
         .tab-button { padding: 1rem 1.5rem; background: white; border: none; cursor: pointer; font-size: 1rem; font-weight: 500; color: #666; border-bottom: 3px solid transparent; margin-bottom: -2px; }
         .tab-button:hover { color: #148496; }
         .tab-button.active { color: white; background: #148496; border-bottom-color: #F1592E; }
-        .tab-content { display: none; }
+        .tab-content { display: none; animation: fadeIn 0.3s ease; }
         .tab-content.active { display: block; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
         .metric-card { background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border-left: 4px solid #148496; }
         .metric-card.accent { border-left-color: #F1592E; }
@@ -25,13 +26,12 @@
         .metric-value { font-size: 2rem; font-weight: bold; color: #148496; }
         .metric-card.accent .metric-value { color: #F1592E; }
         .metric-change { font-size: 0.85rem; color: #666; margin-top: 0.5rem; }
-        .chart-container { background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 2rem; height: 350px; }
-        .chart-container h3 { margin-bottom: 1rem; color: #148496; font-size: 1.2rem; }
-        .chart-wrapper { position: relative; height: 280px; }
+        .chart-section { background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 2rem; }
+        .chart-section h3 { margin-bottom: 1rem; color: #148496; font-size: 1.2rem; }
         .top-posts-table { background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 2rem; overflow-x: auto; }
         .top-posts-table h3 { margin-bottom: 1rem; color: #148496; font-size: 1.2rem; }
         table { width: 100%; border-collapse: collapse; }
-        th { background: #f5f5f5; padding: 0.75rem; text-align: left; border-bottom: 2px solid #e0e0e0; }
+        th { background: #f5f5f5; padding: 0.75rem; text-align: left; border-bottom: 2px solid #e0e0e0; font-weight: 600; }
         td { padding: 0.75rem; border-bottom: 1px solid #e0e0e0; }
         tr:hover { background: #fafafa; }
         footer { text-align: center; padding: 2rem; color: #999; font-size: 0.9rem; }
@@ -40,7 +40,7 @@
 <body>
     <header>
         <h1>The Autism Helper</h1>
-        <p>Weekly Social Media Dashboard &mdash; April 07 - April 13, 2026</p>
+        <p>Weekly Social Media Dashboard &mdash; April 08 - April 14, 2026</p>
     </header>
     <div class="container">
         <div class="tabs">
@@ -55,13 +55,13 @@
                 
         <div class="metric-card">
             <div class="metric-label">Total Followers</div>
-            <div class="metric-value">0</div>
+            <div class="metric-value">&mdash;</div>
             <div class="metric-change"></div>
         </div>
                 
         <div class="metric-card accent">
             <div class="metric-label">Total Engagements</div>
-            <div class="metric-value">220,976</div>
+            <div class="metric-value">225,202</div>
             <div class="metric-change"></div>
         </div>
                 
@@ -77,9 +77,9 @@
             <div class="metric-change"></div>
         </div>
             </div>
-            <div class="chart-container">
+            <div class="chart-section">
                 <h3>&#128202; Engagement by Platform</h3>
-                <div class="chart-wrapper"><canvas id="platformChart"></canvas></div>
+                <canvas id="platformChart" width="800" height="400"></canvas>
             </div>
         </div>
         
@@ -95,7 +95,7 @@
                 
         <div class="metric-card accent">
             <div class="metric-label">Total Engagements</div>
-            <div class="metric-value">220,165</div>
+            <div class="metric-value">224,380</div>
             <div class="metric-change"></div>
         </div>
                 
@@ -126,10 +126,10 @@
 
 After the bell, Grace resets visuals,</td>
                             <td>Video</td>
-                            <td>150</td>
-                            <td>4</td>
-                            <td>17,373</td>
-                            <td>7,203</td>
+                            <td>152</td>
+                            <td>6</td>
+                            <td>17,591</td>
+                            <td>7,287</td>
                         </tr>
                         <tr>
                             <td>Ranking Special Education Strategies &#128079;
@@ -139,16 +139,16 @@ So</td>
                             <td>Video</td>
                             <td>270</td>
                             <td>5</td>
-                            <td>15,735</td>
-                            <td>4,987</td>
+                            <td>15,743</td>
+                            <td>4,993</td>
                         </tr>
                         <tr>
                             <td>If you&#8217;ve ever tried to teach the alphabet to a group of students on completely</td>
                             <td>Video</td>
                             <td>219</td>
                             <td>264</td>
-                            <td>15,420</td>
-                            <td>5,536</td>
+                            <td>15,427</td>
+                            <td>5,540</td>
                         </tr>
                         <tr>
                             <td>Restaurant & Mealtime Choice Boards &#128170;&#128170;
@@ -157,17 +157,17 @@ It&#8217;s all about communication.
 
 Giving cl</td>
                             <td>Video</td>
-                            <td>150</td>
-                            <td>32</td>
-                            <td>15,148</td>
-                            <td>5,112</td>
+                            <td>151</td>
+                            <td>34</td>
+                            <td>15,174</td>
+                            <td>5,123</td>
                         </tr>
                     </tbody>
                 </table>
             </div>
         </div>
         <div id="tiktok" class="tab-content">
-            <p style="color:#999;font-style:italic;margin-bottom:1rem">Scraper returned no data for this platform on this run.</p>
+            <p style="color:#F1592E;font-style:italic;margin-bottom:1rem;padding:1rem;background:#fff3f0;border-radius:8px">Scraper returned no data for this platform. It may need to be re-run.</p>
             <div class="metrics-grid">
                 
         <div class="metric-card">
@@ -270,7 +270,7 @@ Giving cl</td>
                 
         <div class="metric-card accent">
             <div class="metric-label">Total Engagements</div>
-            <div class="metric-value">811</div>
+            <div class="metric-value">822</div>
             <div class="metric-change"></div>
         </div>
                 
@@ -303,7 +303,7 @@ These Visual Conversation Starters work on&#8230;
 &#9989;ask</td>
                             <td>Post</td>
                             <td>53</td>
-                            <td>170</td>
+                            <td>175</td>
                             <td>10</td>
                             <td>0</td>
                         </tr>
@@ -337,27 +337,43 @@ These Visual Conversation Starters work on&#8230;
         </div>
     </div>
     <footer>
-        <p>Dashboard generated April 13, 2026 at 19:07 UTC &mdash; Live data from Apify</p>
+        <p>Dashboard generated April 14, 2026 at 16:32 UTC &mdash; Live data from Apify scrapers</p>
     </footer>
     <script>
         function switchTab(evt, name) {
-            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
-            document.querySelectorAll('.tab-button').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(function(el) { el.classList.remove('active'); });
+            document.querySelectorAll('.tab-button').forEach(function(el) { el.classList.remove('active'); });
             document.getElementById(name).classList.add('active');
             evt.currentTarget.classList.add('active');
         }
-        new Chart(document.getElementById('platformChart'), {
-            type: 'bar',
-            data: {
-                labels: ["Instagram", "Tiktok", "Youtube", "Facebook"],
-                datasets: [{
-                    label: 'Engagements',
-                    data: [220165, 0, 0, 811],
-                    backgroundColor: ['#148496', '#F1592E', '#148496', '#F1592E']
-                }]
-            },
-            options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } }
-        });
+        var ctx = document.getElementById('platformChart');
+        if (ctx) {
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: ["Instagram", "Tiktok", "Youtube", "Facebook"],
+                    datasets: [{
+                        label: 'Total Engagements',
+                        data: [224380, 0, 0, 822],
+                        backgroundColor: ['#148496', '#F1592E', '#148496', '#F1592E'],
+                        borderRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: { callback: function(v) { return v.toLocaleString(); } }
+                        }
+                    }
+                }
+            });
+        }
     </script>
 </body>
 </html>
