@@ -3,7 +3,7 @@
 Build a social media dashboard for The Autism Helper.
  
 This script:
-1. Calls Apify API to scrape Instagram, TikTok, YouTube, and Facebook data
+1. Calls Apify API to scrape Instagram, TikTok, YouTube, Facebook, and Pinterest data
 2. Aggregates metrics
 3. Generates an HTML dashboard
 4. Sends a Slack notification
@@ -60,6 +60,14 @@ PLATFORMS = {
             "resultsLimit": 30,
         },
         "color": "#1877F2",
+    },
+    "pinterest": {
+        "actor_id": "apify~pinterest-scraper",
+        "input": {
+            "startUrls": [{"url": "https://www.pinterest.com/theautismhelper/"}],
+            "maxItems": 30,
+        },
+        "color": "#E60023",
     },
 }
  
@@ -133,19 +141,27 @@ def call_apify_actor(actor_id: str, input_data: Dict[str, Any]) -> Optional[List
     Call an Apify actor and poll for results.
     Returns the items list or None if failed.
     """
-    headers = {"Authorization": f"Bearer {APIFY_TOKEN}"}
+    params = {"token": APIFY_TOKEN}
  
     # Start the actor run
-    run_url = f"{APIFY_API_BASE}/actors/{actor_id}/runs"
-    start_response = requests.post(
-        run_url,
-        json={"input": input_data},
-        headers=headers,
-        timeout=30,
-    )
+    run_url = f"{APIFY_API_BASE}/acts/{actor_id}/runs"
+    log(f"POST {run_url}")
+    log(f"Input: {json.dumps(input_data)[:200]}")
+ 
+    try:
+        start_response = requests.post(
+            run_url,
+            json=input_data,
+            params=params,
+            timeout=60,
+        )
+    except Exception as e:
+        log(f"Request error for {actor_id}: {e}")
+        return None
  
     if start_response.status_code not in (200, 201):
         log(f"Failed to start actor {actor_id}: {start_response.status_code}")
+        log(f"Response body: {start_response.text[:500]}")
         return None
  
     run_data = start_response.json()
@@ -153,6 +169,7 @@ def call_apify_actor(actor_id: str, input_data: Dict[str, Any]) -> Optional[List
  
     if not run_id:
         log(f"No run ID returned for actor {actor_id}")
+        log(f"Response: {json.dumps(run_data)[:300]}")
         return None
  
     log(f"Run started: {run_id}")
@@ -165,10 +182,14 @@ def call_apify_actor(actor_id: str, input_data: Dict[str, Any]) -> Optional[List
         elapsed = time.time() - start_time
  
         if elapsed > MAX_WAIT_TIME:
-            log(f"Timeout waiting for actor {actor_id}")
+            log(f"Timeout waiting for actor {actor_id} after {elapsed:.0f}s")
             return None
  
-        status_response = requests.get(status_url, headers=headers, timeout=30)
+        try:
+            status_response = requests.get(status_url, params=params, timeout=30)
+        except Exception as e:
+            log(f"Status check error: {e}")
+            return None
  
         if status_response.status_code != 200:
             log(f"Failed to check status for {run_id}: {status_response.status_code}")
@@ -176,6 +197,7 @@ def call_apify_actor(actor_id: str, input_data: Dict[str, Any]) -> Optional[List
  
         status_data = status_response.json()
         status = status_data.get("data", {}).get("status")
+        log(f"  {actor_id} status: {status} ({elapsed:.0f}s elapsed)")
  
         if status == "SUCCEEDED":
             break
@@ -194,13 +216,19 @@ def call_apify_actor(actor_id: str, input_data: Dict[str, Any]) -> Optional[List
         return None
  
     items_url = f"{APIFY_API_BASE}/datasets/{dataset_id}/items"
-    items_response = requests.get(items_url, headers=headers, timeout=30)
+ 
+    try:
+        items_response = requests.get(items_url, params=params, timeout=30)
+    except Exception as e:
+        log(f"Fetch items error: {e}")
+        return None
  
     if items_response.status_code != 200:
         log(f"Failed to fetch items from {dataset_id}: {items_response.status_code}")
         return None
  
     items = items_response.json()
+    log(f"  Got {len(items) if isinstance(items, list) else 0} items from {actor_id}")
     return items if isinstance(items, list) else []
  
  
@@ -414,6 +442,50 @@ def aggregate_youtube(items: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
  
  
+def aggregate_pinterest(items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Aggregate Pinterest data."""
+    posts = []
+ 
+    for item in items:
+        saves = find_value(item, "saves", "saveCount", "repinCount", "repins")
+        comments = find_value(item, "commentsCount", "commentCount", "comments")
+        likes = find_value(item, "likes", "likesCount", "reactions")
+        views = find_value(item, "impressions", "views", "closeupCount")
+        caption = item.get("title") or item.get("description") or item.get("text") or ""
+ 
+        engagement = likes + (comments * 3) + (saves * 5)
+ 
+        posts.append({
+            "url": item.get("url") or item.get("link") or "",
+            "caption": caption[:100] + "..." if len(caption) > 100 else caption,
+            "likes": likes,
+            "comments": comments,
+            "shares": saves,
+            "views": views,
+            "engagement": engagement,
+            "timestamp": item.get("createdAt") or item.get("timestamp") or datetime.now().isoformat(),
+        })
+ 
+    top_posts = sorted(posts, key=lambda x: x["engagement"], reverse=True)[:5]
+ 
+    total_likes = sum(p["likes"] for p in posts)
+    total_comments = sum(p["comments"] for p in posts)
+    total_saves = sum(p["shares"] for p in posts)
+    total_views = sum(p["views"] for p in posts)
+    total_engagement = total_likes + (total_comments * 3) + (total_saves * 5)
+ 
+    return {
+        "platform": "Pinterest",
+        "posts_analyzed": len(posts),
+        "total_likes": total_likes,
+        "total_comments": total_comments,
+        "total_shares": total_saves,
+        "total_views": total_views,
+        "total_engagement": total_engagement,
+        "top_posts": top_posts,
+    }
+ 
+ 
 def aggregate_data(raw_data: Dict[str, List[Dict[str, Any]]]) -> Dict[str, Dict[str, Any]]:
     """Aggregate all platform data."""
     aggregated = {}
@@ -429,6 +501,9 @@ def aggregate_data(raw_data: Dict[str, List[Dict[str, Any]]]) -> Dict[str, Dict[
  
     if raw_data.get("facebook"):
         aggregated["facebook"] = aggregate_facebook(raw_data["facebook"])
+ 
+    if raw_data.get("pinterest"):
+        aggregated["pinterest"] = aggregate_pinterest(raw_data["pinterest"])
  
     return aggregated
  
@@ -525,6 +600,13 @@ def generate_action_items(platform: str) -> List[str]:
             "Share longer-form educational articles and case studies",
             "Create a Facebook Group for community discussion and resource sharing",
         ]
+    elif platform.lower() == "pinterest":
+        return [
+            "Create visually rich pins for classroom setup ideas and sensory activities",
+            "Build themed boards (IEP tips, visual schedules, behavior strategies) to drive saves",
+            "Add keyword-rich descriptions to pins for search discoverability",
+            "Repurpose blog content and TPT products into Idea Pins with step-by-step visuals",
+        ]
  
     return ["Continue monitoring and optimizing content performance"]
  
@@ -557,6 +639,7 @@ def generate_html(aggregated: Dict[str, Dict[str, Any]]) -> str:
         "tiktok": "#000000",
         "youtube": "#FF0000",
         "facebook": "#1877F2",
+        "pinterest": "#E60023",
     }
  
     engagement_by_platform = {
@@ -959,6 +1042,7 @@ def generate_html(aggregated: Dict[str, Dict[str, Any]]) -> str:
             <button class="tab-button" data-tab="tiktok">TikTok</button>
             <button class="tab-button" data-tab="youtube">YouTube</button>
             <button class="tab-button" data-tab="facebook">Facebook</button>
+            <button class="tab-button" data-tab="pinterest">Pinterest</button>
         </div>
  
         <!-- OVERVIEW TAB -->
